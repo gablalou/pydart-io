@@ -30,7 +30,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. User can query per-column diagnostics and see a report confirming zero-copy=true for each numeric/bool column
   4. User can export a Table via the Arrow PyCapsule Interface (`__arrow_c_array__`/`__arrow_c_stream__`/`__arrow_c_schema__`) and have it accepted zero-copy by pyarrow, Polars, or DuckDB
   5. User can import a foreign Arrow object (pyarrow Table, Polars DataFrame) via the PyCapsule Interface into a Table with zero-copy
-**Plans**: TBD
+**Plans**: 4 plans
+- [ ] 01-01-PLAN.md — Walking Skeleton: two-crate workspace + Table shell + thin numeric round-trip + one pyarrow PyCapsule export
+- [ ] 01-02-PLAN.md — Full per-column decision matrix (plan_column) + strict mode + copy_report diagnostics
+- [ ] 01-03-PLAN.md — Dual zero-copy proofs: Python pointer-identity + Rust allocation-counter (D-06)
+- [ ] 01-04-PLAN.md — PyCapsule interop: from_arrow import + export/import validated against pyarrow, Polars, DuckDB
 
 ### Phase 2: Full Dtype & Structural Coverage
 **Goal**: The conversion pipeline from Phase 1 correctly handles every realistic pandas column shape — nulls, object/string, categorical, datetime/timezone, timedelta, and multi-chunk tables — so the conversion story is complete rather than numeric-only.
@@ -76,7 +80,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Core Zero-Copy Round-Trip & Interop | 0/TBD | Not started | - |
+| 1. Core Zero-Copy Round-Trip & Interop | 0/4 | Not started | - |
 | 2. Full Dtype & Structural Coverage | 0/TBD | Not started | - |
 | 3. Parquet IO | 0/TBD | Not started | - |
 | 4. Benchmark & Release Readiness | 0/TBD | Not started | - |
