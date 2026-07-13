@@ -40,6 +40,7 @@ Converting a pandas DataFrame to/from an Arrow Table should be zero-copy (or as 
 - **Language**: Rust core with Python bindings (e.g. PyO3/maturin-style toolchain) — this is the whole premise of the project, not negotiable.
 - **Format**: Must use the Arrow columnar memory format (not a custom layout) so it interoperates with the existing Arrow/Parquet ecosystem.
 - **Scope discipline**: v1 is bridge + Parquet IO only — no compute engine, no distributed execution, no other language bindings.
+- **Tooling**: Python packaging/dev workflow must be `uv`-compatible (install via `uv add`/`uv pip install`, lockfile and dev commands work under `uv`).
 
 ## Key Decisions
 
