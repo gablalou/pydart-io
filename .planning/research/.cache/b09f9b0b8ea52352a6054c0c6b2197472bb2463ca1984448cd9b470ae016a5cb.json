@@ -1,0 +1,1 @@
+{"content":"VERIFIED via crates.io API: maturin latest is 1.14.1. Used as PEP517 build backend; maturin-action is the standard GH Action wrapping it for manylinux/musllinux/macOS/Windows cross-compilation in CI.","source":"web","provider":"webfetch","confidence":"LOW","fetched_at":"2026-07-13T11:59:20.373Z","ttl":86400000,"kind":"web"}

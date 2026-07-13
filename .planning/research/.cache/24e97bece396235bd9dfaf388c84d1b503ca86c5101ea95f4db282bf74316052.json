@@ -1,0 +1,1 @@
+{"content":"VERIFIED via crates.io API: arrow crate latest is 59.1.0 (as of ~2026-07-07), monthly cadence. arrow2/polars-arrow are not general-purpose alternatives for a new project -- arrow2 is unmaintained/archived, polars-arrow is Polars-internal.","source":"web","provider":"webfetch","confidence":"LOW","fetched_at":"2026-07-13T11:59:20.443Z","ttl":86400000,"kind":"web"}

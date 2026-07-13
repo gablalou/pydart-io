@@ -1,0 +1,1 @@
+{"content":"VERIFIED via crates.io/PyPI: pyo3-arrow latest is 0.19.0; arro3-core latest on PyPI is 0.8.1. arro3 remains the closest prior-art reference implementation of a minimal PyO3+arrow-rs Python Arrow library.","source":"web","provider":"webfetch","confidence":"LOW","fetched_at":"2026-07-13T11:59:20.590Z","ttl":86400000,"kind":"web"}
