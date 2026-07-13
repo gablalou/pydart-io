@@ -1,0 +1,71 @@
+# Flint (placeholder name)
+
+## What This Is
+
+A Rust-backed Python library for Arrow-format-compatible columnar data — a leaner, lower-level alternative to pyarrow focused specifically on eliminating the memory-copy overhead of pandas <-> Arrow conversion. It's for the open source community: Python/data users who feel pyarrow's conversion overhead and want a faster, more focused interop layer rather than a full DataFrame engine like Polars.
+
+## Core Value
+
+Converting a pandas DataFrame to/from an Arrow Table should be zero-copy (or as close to it as physically possible) and measurably faster than pyarrow — this must work and must be provably faster, or the project has no reason to exist.
+
+## Requirements
+
+### Validated
+
+(None yet — ship to validate)
+
+### Active
+
+- [ ] Zero-copy (or minimal-copy) conversion from pandas DataFrame to Arrow-compatible Table, implemented in Rust with Python bindings
+- [ ] Zero-copy (or minimal-copy) conversion from Arrow-compatible Table back to pandas DataFrame
+- [ ] Arrow columnar memory format compatibility (interoperates with the existing Arrow/Parquet ecosystem — Polars, DuckDB, etc.)
+- [ ] Read/write Parquet files
+- [ ] Benchmark suite comparing conversion speed and memory usage directly against pyarrow
+
+### Out of Scope
+
+- Compute kernels (filter, groupby, join, aggregation) — that's a query-engine concern (Polars' territory), not this library's job. Revisit as a future milestone if there's demand.
+- Distributed / out-of-core execution — single machine, in-memory only for the foreseeable future.
+- Multi-language bindings (R, Node, etc.) — Python only. Rust core could theoretically support this later, but not a v1 concern.
+- CSV/JSON file IO — Parquet is the priority; other formats deferred until Parquet path is solid.
+
+## Context
+
+- The user's daily pain point is pyarrow's pandas <-> Arrow round-trip: converting DataFrames to/from Arrow Tables copies data unnecessarily, which adds up at scale.
+- Polars already solves Rust + Python + Arrow-compatible + fast pandas interop, but as a full DataFrame/query engine. This project deliberately stays narrower and lower-level — a bridge/interop library, not a competitor to Polars' compute engine.
+- Positioned as a pyarrow alternative specifically for the interop layer, intended for public/open-source release and adoption.
+
+## Constraints
+
+- **Language**: Rust core with Python bindings (e.g. PyO3/maturin-style toolchain) — this is the whole premise of the project, not negotiable.
+- **Format**: Must use the Arrow columnar memory format (not a custom layout) so it interoperates with the existing Arrow/Parquet ecosystem.
+- **Scope discipline**: v1 is bridge + Parquet IO only — no compute engine, no distributed execution, no other language bindings.
+
+## Key Decisions
+
+| Decision | Rationale | Outcome |
+|----------|-----------|---------|
+| Arrow-compatible memory format (not custom) | Interop with existing ecosystem (Parquet, Polars, DuckDB) matters more than a bespoke layout | — Pending |
+| Narrower/lower-level than Polars | Polars already owns the full DataFrame/query-engine niche; differentiate as a leaner interop-focused library | — Pending |
+| v1 = zero-copy bridge + Parquet IO, no compute kernels | Keep v1 scope tight and provably valuable (benchmarkable) before expanding | — Pending |
+| Success measured by benchmark vs pyarrow | Speed/memory claims need hard numbers, not just "should be faster" | — Pending |
+
+## Evolution
+
+This document evolves at phase transitions and milestone boundaries.
+
+**After each phase transition** (via `/gsd-transition`):
+1. Requirements invalidated? → Move to Out of Scope with reason
+2. Requirements validated? → Move to Validated with phase reference
+3. New requirements emerged? → Add to Active
+4. Decisions to log? → Add to Key Decisions
+5. "What This Is" still accurate? → Update if drifted
+
+**After each milestone** (via `/gsd-complete-milestone`):
+1. Full review of all sections
+2. Core Value check — still the right priority?
+3. Audit Out of Scope — reasons still valid?
+4. Update Context with current state
+
+---
+*Last updated: 2026-07-13 after initialization*
