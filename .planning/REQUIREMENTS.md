@@ -73,35 +73,35 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CONV-01 | TBD | Pending |
-| CONV-02 | TBD | Pending |
-| CONV-03 | TBD | Pending |
-| CONV-04 | TBD | Pending |
-| CONV-05 | TBD | Pending |
-| CONV-06 | TBD | Pending |
-| CONV-07 | TBD | Pending |
-| CONV-08 | TBD | Pending |
-| DIAG-01 | TBD | Pending |
-| DIAG-02 | TBD | Pending |
-| CAP-01 | TBD | Pending |
-| CAP-02 | TBD | Pending |
-| PARQ-01 | TBD | Pending |
-| PARQ-02 | TBD | Pending |
-| PARQ-03 | TBD | Pending |
-| PARQ-04 | TBD | Pending |
-| PARQ-05 | TBD | Pending |
-| PARQ-06 | TBD | Pending |
-| BENCH-01 | TBD | Pending |
-| BENCH-02 | TBD | Pending |
-| PKG-01 | TBD | Pending |
-| PKG-02 | TBD | Pending |
-| PKG-03 | TBD | Pending |
+| CONV-01 | Phase 1 | Pending |
+| CONV-02 | Phase 1 | Pending |
+| CONV-03 | Phase 2 | Pending |
+| CONV-04 | Phase 2 | Pending |
+| CONV-05 | Phase 2 | Pending |
+| CONV-06 | Phase 2 | Pending |
+| CONV-07 | Phase 2 | Pending |
+| CONV-08 | Phase 2 | Pending |
+| DIAG-01 | Phase 1 | Pending |
+| DIAG-02 | Phase 1 | Pending |
+| CAP-01 | Phase 1 | Pending |
+| CAP-02 | Phase 1 | Pending |
+| PARQ-01 | Phase 3 | Pending |
+| PARQ-02 | Phase 3 | Pending |
+| PARQ-03 | Phase 3 | Pending |
+| PARQ-04 | Phase 3 | Pending |
+| PARQ-05 | Phase 3 | Pending |
+| PARQ-06 | Phase 3 | Pending |
+| BENCH-01 | Phase 4 | Pending |
+| BENCH-02 | Phase 4 | Pending |
+| PKG-01 | Phase 4 | Pending |
+| PKG-02 | Phase 4 | Pending |
+| PKG-03 | Phase 4 | Pending |
 
 **Coverage:**
 - v1 requirements: 23 total
-- Mapped to phases: 0
-- Unmapped: 23 ⚠️ (filled by roadmap creation)
+- Mapped to phases: 23
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-07-13*
-*Last updated: 2026-07-13 after initial definition*
+*Last updated: 2026-07-13 after roadmap creation*
