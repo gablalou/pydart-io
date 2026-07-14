@@ -40,12 +40,9 @@ use flint_core::pandas_plan::{plan_column, ArrowKind, ColumnPlan, DtypeBackend};
 
 use crate::error::FlintError;
 
-/// A single column's conversion outcome, retained on `Table` so `copy_report()` (Task 2) can
-/// report the ACTUAL decision `from_pandas` made -- not a re-derived, possibly-diverging one.
-///
-/// Fields are not yet read anywhere in this task (Task 2 adds `copy_report()`/strict-mode
-/// consumers); `#[allow(dead_code)]` silences the warning until then.
-#[allow(dead_code)]
+/// A single column's conversion outcome, retained on `Table` so `copy_report()` (D-04) and
+/// strict-mode (D-03) -- both in `crate::diagnostics` -- report the ACTUAL decision `from_pandas`
+/// made, rather than a re-derived, possibly-diverging one (T-01-05).
 #[derive(Debug, Clone)]
 pub struct ColumnConversionRecord {
     pub column: String,

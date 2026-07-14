@@ -32,6 +32,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyCapsule, PyDict, PyType};
 use pyo3_arrow::PyTable;
 
+use crate::diagnostics;
 use crate::error::FlintError;
 use crate::pandas::{self, ColumnConversionRecord};
 
@@ -39,15 +40,10 @@ use crate::pandas::{self, ColumnConversionRecord};
 #[pyclass(name = "Table")]
 pub struct Table {
     inner: Py<PyTable>,
-    /// The per-column conversion decision `from_pandas` actually made, retained so Task 2's
-    /// `copy_report()` reports the real outcome rather than re-deriving (possibly-diverging)
-    /// results. Empty for a `Table` not constructed via `from_pandas` (e.g. future PyCapsule
+    /// The per-column conversion decision `from_pandas` actually made, retained so
+    /// `copy_report()` reports the real outcome rather than re-deriving a (possibly-diverging)
+    /// decision. Empty for a `Table` not constructed via `from_pandas` (e.g. future PyCapsule
     /// import, Plan 04).
-    ///
-    /// Not yet read anywhere (Task 2 adds `copy_report()`); silence the dead-code warning until
-    /// then rather than deferring the field itself past Task 1 (from_pandas is the only place
-    /// that can produce it).
-    #[allow(dead_code)]
     column_reports: Vec<ColumnConversionRecord>,
 }
 
@@ -57,9 +53,14 @@ impl Table {
     /// through `plan_column` (CONV-01/CONV-02, full numeric+bool matrix).
     ///
     /// Any column outside this phase's numeric/bool scope raises `FlintError::UnsupportedColumn`
-    /// naming the offending column and dtype (no silent copy). `strict` is threaded through but
-    /// not yet enforced here — Task 2's diagnostics surface (`flint.ZeroCopyRequiredError`) adds
-    /// the pre-flight strict-mode check on top of this same per-column plan.
+    /// naming the offending column and dtype (no silent copy).
+    ///
+    /// When `strict=True` (D-03, DIAG-01): every column's plan is computed first (via
+    /// `pandas::from_pandas`, which is per-column and pre-flight in the sense that it always
+    /// evaluates every column's plan before this function decides anything), and if ANY column
+    /// requires a copy, `flint.ZeroCopyRequiredError` is raised naming the first offending column
+    /// and its dtype -- never a whole-table try/catch (RESEARCH.md Pitfall 2). With `strict=False`
+    /// (default), `RequiresCopy` columns are converted with a copy and no exception is raised.
     #[classmethod]
     #[pyo3(signature = (df, strict=false))]
     fn from_pandas(
@@ -68,9 +69,12 @@ impl Table {
         df: &Bound<'_, PyAny>,
         strict: bool,
     ) -> PyResult<Self> {
-        let _ = strict; // strict-mode pre-flight raise is Task 2 (diagnostics.rs)
-
         let outcome = pandas::from_pandas(py, df)?;
+
+        if strict {
+            diagnostics::check_strict(&outcome.records)?;
+        }
+
         let schema = outcome.batch.schema();
         let py_table = PyTable::try_new(vec![outcome.batch], schema)?;
 
@@ -175,5 +179,12 @@ impl Table {
             .map(|buffer| buffer.as_ptr() as usize)
             .unwrap_or(0);
         Ok(address)
+    }
+
+    /// Return per-column zero-copy diagnostics (DIAG-02, D-04): one `flint.ColumnCopyStatus` per
+    /// column, derived from the SAME per-column plan `from_pandas` used to build this `Table` --
+    /// not a re-derived decision, so this can never silently disagree with strict mode (T-01-05).
+    fn copy_report(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
+        diagnostics::build_copy_report(py, &self.column_reports)
     }
 }
