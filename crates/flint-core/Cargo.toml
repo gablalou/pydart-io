@@ -1,0 +1,15 @@
+[package]
+name = "flint-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "flint_core"
+crate-type = ["rlib"]
+
+[dependencies]
+arrow = "59.1.0"
+
+[dev-dependencies]
+allocation-counter = "0.8"

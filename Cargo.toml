@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/flint-core",
+    "crates/flint-python",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+
+[profile.release]
+lto = true
