@@ -47,6 +47,23 @@ pub struct Table {
     column_reports: Vec<ColumnConversionRecord>,
 }
 
+impl Table {
+    /// Wrap an already-constructed `pyo3_arrow::PyTable` in this project's `Table` (D-01).
+    ///
+    /// Used by `crate::import::from_arrow` (CAP-02): the foreign-object marshalling and
+    /// validation has already happened by the time this is called (via `pyo3-arrow`'s own
+    /// `FromPyObject` impl on `PyTable`) -- this is purely a composition step, not a place where
+    /// any additional `unsafe` dereferencing occurs. `column_reports` is empty because a `Table`
+    /// built this way was not produced by `from_pandas`'s per-column decision process (D-04's
+    /// `copy_report()` has nothing to report for an imported-via-PyCapsule `Table`).
+    pub(crate) fn from_pytable(py: Python<'_>, inner: PyTable) -> PyResult<Self> {
+        Ok(Self {
+            inner: Py::new(py, inner)?,
+            column_reports: Vec::new(),
+        })
+    }
+}
+
 #[pymethods]
 impl Table {
     /// Build a `Table` from a pandas DataFrame, driving every column's copy-vs-borrow decision
