@@ -55,12 +55,17 @@ impl Table {
     /// Any column outside this phase's numeric/bool scope raises `FlintError::UnsupportedColumn`
     /// naming the offending column and dtype (no silent copy).
     ///
-    /// When `strict=True` (D-03, DIAG-01): every column's plan is computed first (via
-    /// `pandas::from_pandas`, which is per-column and pre-flight in the sense that it always
-    /// evaluates every column's plan before this function decides anything), and if ANY column
-    /// requires a copy, `flint.ZeroCopyRequiredError` is raised naming the first offending column
-    /// and its dtype -- never a whole-table try/catch (RESEARCH.md Pitfall 2). With `strict=False`
-    /// (default), `RequiresCopy` columns are converted with a copy and no exception is raised.
+    /// When `strict=True` (D-03, DIAG-01): `pandas::from_pandas` always computes AND applies
+    /// every column's plan (conversion happens regardless of `strict`); this function then reads
+    /// the resulting per-column records and, if ANY column's plan was `RequiresCopy`, discards the
+    /// already-built batch and raises `flint.ZeroCopyRequiredError` naming the first offending
+    /// column and its dtype. This is honest about being a per-column decision read off the real,
+    /// already-computed plan for every column -- never a whole-table try/catch that loses
+    /// per-column attribution (RESEARCH.md Pitfall 2) -- but it is NOT a zero-work pre-conversion
+    /// gate: the copy this rejects has already happened once before being discarded. The
+    /// *observable* contract (a caller never receives a copied `Table` under `strict=True`) is
+    /// unaffected. With `strict=False` (default), `RequiresCopy` columns are converted with a
+    /// copy and no exception is raised.
     #[classmethod]
     #[pyo3(signature = (df, strict=false))]
     fn from_pandas(
@@ -91,9 +96,18 @@ impl Table {
     /// export to a `pyarrow.Table`) with pyarrow's own documented
     /// `Table.to_pandas(types_mapper=pandas.ArrowDtype)` conversion, which pandas' own ArrowDtype
     /// machinery performs without copying when the target dtype already matches.
+    ///
+    /// Deliberately does NOT call `plan_column` per output column: every column of a `Table` is,
+    /// by construction, already Arrow memory (`RecordBatch` columns), so `plan_column`'s backend
+    /// input would always be `DtypeBackend::Arrow`, which always resolves to `ZeroCopyBorrow`
+    /// regardless of `ArrowKind`. There is no copy-vs-borrow DECISION to make on the way out (see
+    /// SUMMARY Deviations for the full reasoning) -- unlike `from_pandas`, which must classify an
+    /// incoming column's backend/contiguity before it knows whether a copy is required.
+    /// `strict` is accepted for API symmetry with `from_pandas` but is a no-op here: `to_pandas`
+    /// is unconditionally zero-copy (confirmed above), so it can never have anything to reject.
     #[pyo3(signature = (strict=false))]
     fn to_pandas(&self, py: Python<'_>, strict: bool) -> PyResult<Py<PyAny>> {
-        let _ = strict; // full strict-mode surface (DIAG-01) is Plan 02
+        let _ = strict; // unconditionally zero-copy; see doc comment above
 
         let batches = self.inner.bind(py).get().batches().to_vec();
         let schema = batches.first().map(|batch| batch.schema()).ok_or_else(|| {
