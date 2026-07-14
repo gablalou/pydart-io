@@ -5,23 +5,47 @@
 //! in-memory model. The PyO3-facing `Table` type (which composes `pyo3_arrow::PyTable`) lives in
 //! `crates/flint-python/src/table.rs`.
 
-use arrow::array::ArrayRef;
+use std::ptr::NonNull;
+use std::sync::Arc;
+
+use arrow::alloc::Allocation;
+use arrow::array::{ArrayRef, PrimitiveArray};
+use arrow::buffer::{Buffer, ScalarBuffer};
+use arrow::datatypes::Int64Type;
 
 /// `flint-core`'s in-memory table representation: a thin re-export of arrow-rs's `RecordBatch`.
 pub type Table = arrow::record_batch::RecordBatch;
 
-/// Stub entry point for building an Arrow array directly from a borrowed numpy buffer, without
-/// copying the underlying data.
+/// Build an Arrow `Int64Array` directly from an existing, pre-allocated `i64` buffer, with NO
+/// copy of the underlying data bytes.
 ///
-/// This is a placeholder target for Plan 03's `allocation-counter`-based no-heap-allocation proof
-/// (D-06b, RESEARCH.md Code Examples). Phase 1 Plan 01 does not implement the borrowing logic
-/// here — the numeric happy-path `from_pandas`/`to_pandas` conversion (Task 2 of this plan) reads
-/// Arrow-backed pandas columns directly via `pyo3-arrow`/the Arrow PyCapsule Interface, which does
-/// not need numpy-buffer borrowing. This stub exists purely so Plan 03 needs no `flint-core`
-/// signature changes when it lands the numpy-buffer zero-copy proof.
+/// This is the `flint-core` (pyo3-free) analog of `flint-python`'s `borrow_numpy_numeric_column`
+/// (`crates/flint-python/src/pandas.rs`): both wrap an existing buffer in an
+/// `arrow_buffer::Buffer` via `Buffer::from_custom_allocation`, which is the specific technique
+/// Plan 03's D-06b allocation-counting proof exists to certify makes zero heap allocations for
+/// the data buffer. This crate has no `pyo3` dependency (see crate-level doc comment), so unlike
+/// the `flint-python` version it cannot itself tie the returned array's lifetime to a `Py<T>`
+/// owner — this function only proves the buffer-wrapping technique itself is allocation-free; it
+/// is exercised directly by `tests/rust/zero_copy_alloc.rs`, not by the production pandas
+/// conversion path (which continues to go through `flint-python::pandas::borrow_numpy_numeric_column`
+/// for the real, GIL-safe ownership handoff).
 ///
-/// # Panics
-/// Always panics via `unimplemented!` until Plan 03 fills in the real implementation.
-pub fn from_numpy_buffer(_ptr: *const u8, _len: usize) -> ArrayRef {
-    unimplemented!("from_numpy_buffer will be implemented for the Plan 03 zero-copy proof")
+/// # Safety
+/// `ptr` must be valid for reads of `len` bytes, and the memory it points to must remain valid
+/// (not freed, not mutated in a way that would violate `Buffer`'s immutability contract) for as
+/// long as the returned array (or any clone of its underlying buffer) is used. This function
+/// takes no ownership handle to keep the source buffer alive — the caller is fully responsible
+/// for the source buffer's lifetime.
+pub unsafe fn from_numpy_buffer(ptr: *const u8, len: usize) -> ArrayRef {
+    let non_null =
+        NonNull::new(ptr as *mut u8).expect("from_numpy_buffer: pointer must not be null");
+    // No real owner to keep alive here (this crate has no `pyo3` dependency to hold a `Py<T>`
+    // handle) -- this mirrors `Deallocation::Custom`'s drop glue running on a no-op `()`, per the
+    // safety contract above: the caller manages the source buffer's actual lifetime.
+    let owner: Arc<dyn Allocation> = Arc::new(());
+    // SAFETY: forwarding this function's own safety contract -- `ptr`/`len` describe a caller-
+    // guaranteed-valid region for the lifetime of the returned buffer.
+    let buffer = unsafe { Buffer::from_custom_allocation(non_null, len, owner) };
+    let scalar_buffer = ScalarBuffer::<i64>::new(buffer, 0, len / std::mem::size_of::<i64>());
+    Arc::new(PrimitiveArray::<Int64Type>::new(scalar_buffer, None))
 }
