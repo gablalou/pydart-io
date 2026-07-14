@@ -5,16 +5,16 @@ milestone_name: milestone
 current_phase: 01
 current_phase_name: core-zero-copy-round-trip-interop
 status: executing
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-07-14T05:39:49.850Z"
+stopped_at: Completed 01-02-PLAN.md
+last_updated: "2026-07-14T06:22:00.113Z"
 last_activity: 2026-07-14
-last_activity_desc: Phase 01 execution started
+last_activity_desc: Completed 01-02-PLAN.md
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 4
-  completed_plans: 1
-  percent: 25
+  completed_plans: 2
+  percent: 50
 ---
 
 # Project State
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-07-13)
 ## Current Position
 
 Phase: 01 (core-zero-copy-round-trip-interop) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Executing Phase 01
-Last activity: 2026-07-14 — Completed 01-01-PLAN.md
+Last activity: 2026-07-14 — Completed 01-02-PLAN.md
 
-Progress: [███░░░░░░░] 25%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
@@ -56,6 +56,7 @@ Progress: [███░░░░░░░] 25%
 
 *Updated after each plan completion*
 | Phase 01 P01 | 24min | 2 tasks | 13 files |
+| Phase 01 P02 | 35 | 2 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -69,6 +70,9 @@ Recent decisions affecting current work:
 - [Phase 01 P01]: Raised PyO3 abi3 floor from abi3-py39 to abi3-py311: pyo3-arrow 0.19.0's buffer-protocol methods require CPython stable-ABI buffer support (>=3.11)
 - [Phase 01 P01]: Set pyproject.toml requires-python to >=3.12 to satisfy the RESEARCH.md-pinned numpy==2.5.1 dev dependency under uv's resolver
 - [Phase 01 P01]: from_pandas/to_pandas delegate to pandas' own __arrow_c_stream__ export and pyarrow's own Table.to_pandas(types_mapper=pandas.ArrowDtype), avoiding hand-rolled FFI and private pandas attributes
+- [Phase 01 P02]: Genuine zero-copy numpy borrow implemented by hand (Buffer::from_custom_allocation + Py<PyArray1<T>> owner) rather than pyo3-arrow's from_numpy(), which was found by reading its source to copy via PrimitiveArray::from_iter_values even on its contiguous fast path
+- [Phase 01 P02]: flint.FlintError/ZeroCopyRequiredError implemented via pyo3::create_exception! with Py-prefixed Rust identifiers to avoid colliding with the internal thiserror FlintError enum
+- [Phase 01 P02]: to_pandas intentionally does not call plan_column per column (every Table column is already Arrow memory, so the decision is always ZeroCopyBorrow) -- documented as a deviation rather than adding a symbolic always-same-result call
 
 ### Pending Todos
 
@@ -90,6 +94,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-14T05:39:38.204Z
-Stopped at: Completed 01-01-PLAN.md
-Resume file: 
+Last session: 2026-07-14T06:22:00.108Z
+Stopped at: Completed 01-02-PLAN.md
+Resume file: None

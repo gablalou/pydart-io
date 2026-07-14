@@ -9,8 +9,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Conversion (pandas <-> Arrow)
 
-- [ ] **CONV-01**: User can convert a pandas DataFrame with non-null numeric/bool columns to an Arrow Table with true zero-copy (no data duplication)
-- [ ] **CONV-02**: User can convert numeric/bool Arrow Table columns back to a pandas DataFrame with true zero-copy
+- [x] **CONV-01**: User can convert a pandas DataFrame with non-null numeric/bool columns to an Arrow Table with true zero-copy (no data duplication)
+- [x] **CONV-02**: User can convert numeric/bool Arrow Table columns back to a pandas DataFrame with true zero-copy
 - [ ] **CONV-03**: User can convert pandas columns with nulls (numeric) to/from an Arrow Table with correct null handling
 - [ ] **CONV-04**: User can convert object/string dtype columns to/from an Arrow Table with correct value and null handling
 - [ ] **CONV-05**: User can convert categorical dtype columns to/from Arrow dictionary-encoded columns
@@ -20,8 +20,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Diagnostics
 
-- [ ] **DIAG-01**: User can request a strict zero-copy mode that errors instead of silently falling back to a copy
-- [ ] **DIAG-02**: User can query per-column diagnostics explaining whether a copy occurred and why
+- [x] **DIAG-01**: User can request a strict zero-copy mode that errors instead of silently falling back to a copy
+- [x] **DIAG-02**: User can query per-column diagnostics explaining whether a copy occurred and why
 
 ### PyCapsule Interop
 
@@ -73,16 +73,16 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CONV-01 | Phase 1 | Pending |
-| CONV-02 | Phase 1 | Pending |
+| CONV-01 | Phase 1 | Complete |
+| CONV-02 | Phase 1 | Complete |
 | CONV-03 | Phase 2 | Pending |
 | CONV-04 | Phase 2 | Pending |
 | CONV-05 | Phase 2 | Pending |
 | CONV-06 | Phase 2 | Pending |
 | CONV-07 | Phase 2 | Pending |
 | CONV-08 | Phase 2 | Pending |
-| DIAG-01 | Phase 1 | Pending |
-| DIAG-02 | Phase 1 | Pending |
+| DIAG-01 | Phase 1 | Complete |
+| DIAG-02 | Phase 1 | Complete |
 | CAP-01 | Phase 1 | Pending |
 | CAP-02 | Phase 1 | Pending |
 | PARQ-01 | Phase 3 | Pending |
@@ -98,6 +98,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PKG-03 | Phase 4 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 23 total
 - Mapped to phases: 23
 - Unmapped: 0 ✓
