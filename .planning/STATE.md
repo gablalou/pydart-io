@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 1
-current_phase_name: Core Zero-Copy Round-Trip & Interop
+current_phase: 01
+current_phase_name: core-zero-copy-round-trip-interop
 status: executing
-stopped_at: Phase 1 context gathered
-last_updated: "2026-07-13T13:53:58.295Z"
-last_activity: 2026-07-13
-last_activity_desc: Roadmap created, 23/23 v1 requirements mapped across 4 phases
+stopped_at: Completed 01-01-PLAN.md
+last_updated: "2026-07-14T05:39:49.850Z"
+last_activity: 2026-07-14
+last_activity_desc: Phase 01 execution started
 progress:
   total_phases: 4
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  total_plans: 4
+  completed_plans: 1
+  percent: 25
 ---
 
 # Project State
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-13)
 
 **Core value:** Converting a pandas DataFrame to/from an Arrow Table should be zero-copy (or as close to it as physically possible) and measurably faster than pyarrow — this must work and must be provably faster, or the project has no reason to exist.
-**Current focus:** Phase 1 - Core Zero-Copy Round-Trip & Interop
+**Current focus:** Phase 01 — core-zero-copy-round-trip-interop
 
 ## Current Position
 
-Phase: 1 of 4 (Core Zero-Copy Round-Trip & Interop)
-Plan: 0 of TBD in current phase
-Status: Ready to execute
-Last activity: 2026-07-13 — Roadmap created, 23/23 v1 requirements mapped across 4 phases
+Phase: 01 (core-zero-copy-round-trip-interop) — EXECUTING
+Plan: 2 of 4
+Status: Executing Phase 01
+Last activity: 2026-07-14 — Completed 01-01-PLAN.md
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [███░░░░░░░] 25%
 
 ## Performance Metrics
 
@@ -55,6 +55,7 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: -
 
 *Updated after each plan completion*
+| Phase 01 P01 | 24min | 2 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -65,6 +66,9 @@ Recent decisions affecting current work:
 
 - Roadmap: Vertical MVP slicing chosen over research's horizontal-layer suggestion — Phase 1 delivers a narrow but complete numeric-only round-trip (conversion + strict-mode diagnostics + PyCapsule interop) before broadening dtype coverage in Phase 2, per project_mode=mvp.
 - Roadmap: Benchmarking (BENCH-01/02) and packaging (PKG-01/02/03) combined into a single Phase 4 "Benchmark & Release Readiness" phase — both are release-gating validation concerns for the core value claim, coarse granularity favors combining them rather than two thin phases.
+- [Phase 01 P01]: Raised PyO3 abi3 floor from abi3-py39 to abi3-py311: pyo3-arrow 0.19.0's buffer-protocol methods require CPython stable-ABI buffer support (>=3.11)
+- [Phase 01 P01]: Set pyproject.toml requires-python to >=3.12 to satisfy the RESEARCH.md-pinned numpy==2.5.1 dev dependency under uv's resolver
+- [Phase 01 P01]: from_pandas/to_pandas delegate to pandas' own __arrow_c_stream__ export and pyarrow's own Table.to_pandas(types_mapper=pandas.ArrowDtype), avoiding hand-rolled FFI and private pandas attributes
 
 ### Pending Todos
 
@@ -86,6 +90,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-13T12:42:30.216Z
-Stopped at: Phase 1 context gathered
-Resume file: .planning/phases/01-core-zero-copy-round-trip-interop/01-CONTEXT.md
+Last session: 2026-07-14T05:39:38.204Z
+Stopped at: Completed 01-01-PLAN.md
+Resume file: 

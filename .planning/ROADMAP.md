@@ -34,10 +34,10 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. User can export a Table via the Arrow PyCapsule Interface (`__arrow_c_array__`/`__arrow_c_stream__`/`__arrow_c_schema__`) and have it accepted zero-copy by pyarrow, Polars, or DuckDB
   5. User can import a foreign Arrow object (pyarrow Table, Polars DataFrame) via the PyCapsule Interface into a Table with zero-copy
 
-**Plans**: 4 plans
+**Plans**: 1/4 plans executed
 **Wave 1**
 
-- [ ] 01-01-PLAN.md — Walking Skeleton: two-crate workspace + Table shell + thin numeric round-trip + one pyarrow PyCapsule export
+- [x] 01-01-PLAN.md — Walking Skeleton: two-crate workspace + Table shell + thin numeric round-trip + one pyarrow PyCapsule export
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -101,7 +101,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Core Zero-Copy Round-Trip & Interop | 0/4 | Not started | - |
+| 1. Core Zero-Copy Round-Trip & Interop | 1/4 | In Progress|  |
 | 2. Full Dtype & Structural Coverage | 0/TBD | Not started | - |
 | 3. Parquet IO | 0/TBD | Not started | - |
 | 4. Benchmark & Release Readiness | 0/TBD | Not started | - |
