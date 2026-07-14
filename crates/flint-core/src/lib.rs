@@ -5,6 +5,8 @@
 //! Python interpreter attached — required for the Plan 03 `allocation-counter` no-heap-allocation
 //! proof (D-06b).
 
+pub mod pandas_plan;
 pub mod table;
 
+pub use pandas_plan::{plan_column, ArrowKind, ColumnPlan, DtypeBackend};
 pub use table::{from_numpy_buffer, Table};
