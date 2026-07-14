@@ -5,16 +5,16 @@ milestone_name: milestone
 current_phase: 01
 current_phase_name: core-zero-copy-round-trip-interop
 status: executing
-stopped_at: Completed 01-02-PLAN.md
-last_updated: "2026-07-14T06:22:00.113Z"
+stopped_at: Completed 01-03-PLAN.md
+last_updated: "2026-07-14T06:52:54.848Z"
 last_activity: 2026-07-14
 last_activity_desc: Completed 01-02-PLAN.md
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 4
-  completed_plans: 2
-  percent: 50
+  completed_plans: 3
+  percent: 0
 ---
 
 # Project State
@@ -29,8 +29,8 @@ See: .planning/PROJECT.md (updated 2026-07-13)
 ## Current Position
 
 Phase: 01 (core-zero-copy-round-trip-interop) — EXECUTING
-Plan: 3 of 4
-Status: Executing Phase 01
+Plan: 4 of 4
+Status: Ready to execute
 Last activity: 2026-07-14 — Completed 01-02-PLAN.md
 
 Progress: [█████░░░░░] 50%
@@ -57,6 +57,7 @@ Progress: [█████░░░░░] 50%
 *Updated after each plan completion*
 | Phase 01 P01 | 24min | 2 tasks | 13 files |
 | Phase 01 P02 | 35 | 2 tasks | 12 files |
+| Phase 01 P03 | 20min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -73,6 +74,8 @@ Recent decisions affecting current work:
 - [Phase 01 P02]: Genuine zero-copy numpy borrow implemented by hand (Buffer::from_custom_allocation + Py<PyArray1<T>> owner) rather than pyo3-arrow's from_numpy(), which was found by reading its source to copy via PrimitiveArray::from_iter_values even on its contiguous fast path
 - [Phase 01 P02]: flint.FlintError/ZeroCopyRequiredError implemented via pyo3::create_exception! with Py-prefixed Rust identifiers to avoid colliding with the internal thiserror FlintError enum
 - [Phase 01 P02]: to_pandas intentionally does not call plan_column per column (every Table column is already Arrow memory, so the decision is always ZeroCopyBorrow) -- documented as a deviation rather than adding a symbolic always-same-result call
+- [Phase 01]: Rust allocation proof asserts info.bytes_total against an 80,000-byte fixture (threshold 1024 bytes) rather than the RESEARCH.md sketch's literal count_total == 0: arrow-buffer's Buffer::from_custom_allocation unconditionally makes a small constant Arc<Bytes> allocation, and wrapping as ArrayRef costs a second constant allocation -- neither copies the data buffer, but together they make count_total == 0 unreachable for any correct binding into arrow-rs's real API
+- [Phase 01]: flint_core::from_numpy_buffer implemented in Plan 03 (not Plan 01), per 01-02-SUMMARY.md's explicit note that the stub was ready for Plan 03 to fill in -- pyo3-free, unsafe fn, no owner-lifetime tracking, exists solely as the D-06b allocation-counting proof's measured entry point
 
 ### Pending Todos
 
@@ -94,6 +97,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-14T06:22:00.108Z
-Stopped at: Completed 01-02-PLAN.md
+Last session: 2026-07-14T06:52:54.694Z
+Stopped at: Completed 01-03-PLAN.md
 Resume file: None
