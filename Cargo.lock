@@ -438,6 +438,7 @@ version = "0.1.0"
 dependencies = [
  "arrow",
  "flint-core",
+ "numpy",
  "pyo3",
  "pyo3-arrow",
  "thiserror 2.0.18",

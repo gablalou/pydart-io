@@ -61,9 +61,22 @@ pub enum ColumnPlan {
 /// `is_contiguous` is ignored for `DtypeBackend::Arrow` columns (already Arrow's own memory,
 /// always zero-copy-borrowable at this phase's scope) and for `Numpy`+`Bool` (bit-packing means
 /// a numpy bool column always requires a copy, regardless of contiguity).
-pub fn plan_column(_dtype_backend: DtypeBackend, _arrow_kind: ArrowKind, _is_contiguous: bool) -> ColumnPlan {
-    // RED: intentionally unimplemented -- see the GREEN commit for the real matrix.
-    unimplemented!("plan_column matrix not yet implemented")
+pub fn plan_column(dtype_backend: DtypeBackend, arrow_kind: ArrowKind, is_contiguous: bool) -> ColumnPlan {
+    match (dtype_backend, arrow_kind) {
+        (DtypeBackend::Arrow, ArrowKind::Numeric) => ColumnPlan::ZeroCopyBorrow,
+        (DtypeBackend::Arrow, ArrowKind::Bool) => ColumnPlan::ZeroCopyBorrow,
+        (DtypeBackend::Numpy, ArrowKind::Numeric) if is_contiguous => ColumnPlan::ZeroCopyBorrow,
+        (DtypeBackend::Numpy, ArrowKind::Numeric) => ColumnPlan::RequiresCopy {
+            reason: "numpy buffer is not contiguous (or has a non-standard stride); cannot be \
+                     borrowed as a flat contiguous buffer without risking an out-of-bounds read"
+                .to_string(),
+        },
+        (DtypeBackend::Numpy, ArrowKind::Bool) => ColumnPlan::RequiresCopy {
+            reason: "numpy bool is stored as 1 byte per element while Arrow bool is bit-packed \
+                     at 1 bit per element; converting requires a repacking copy"
+                .to_string(),
+        },
+    }
 }
 
 #[cfg(test)]

@@ -8,9 +8,24 @@
 //! actual FFI_ArrowArray/FFI_ArrowSchema construction entirely to `pyo3-arrow`'s already-compiled,
 //! already-registered Python methods; it does not reimplement any of that marshalling.
 //!
-//! Task 2 implements the numeric happy path only (D-02, CONV-01/CONV-02): non-null
-//! `int64[pyarrow]`/`float64[pyarrow]` (`pandas.ArrowDtype`-backed) columns. The full per-column
-//! decision matrix, numpy-backed borrow, and bool handling are Plan 02.
+//! `from_pandas`'s per-column copy-vs-borrow decision logic lives in `crate::pandas` (driven by
+//! `flint_core::pandas_plan::plan_column`, the single source of truth also consumed by Task 2's
+//! strict mode / `copy_report()`). This module stays a thin `#[pyclass]` shell.
+//!
+//! ## `to_pandas` reverse-direction zero-copy confirmation (CONV-02)
+//!
+//! `to_pandas` goes through `pyo3_arrow::PyTable::into_pyarrow` (a real `pyarrow.Table`,
+//! constructed from this `Table`'s own Arrow buffers with no data copy) and then pyarrow's own
+//! `Table.to_pandas(types_mapper=pandas.ArrowDtype)`. This was empirically confirmed this plan
+//! (against the pinned pandas 3.0.3 / pyarrow 25.0.0) to be genuinely zero-copy: constructing a
+//! pyarrow `Table` from a known buffer address and round-tripping it through
+//! `to_pandas(types_mapper=pandas.ArrowDtype)` produces a pandas `ArrowDtype` column whose
+//! underlying `._pa_array` chunk buffer address is IDENTICAL to the original — pandas'
+//! `ArrowExtensionArray` wraps the pyarrow `ChunkedArray` by reference, it does not copy the data
+//! buffer. This is the "pyarrow-intermediary" mechanism RESEARCH.md anticipated as a possible
+//! fallback; the spike confirms it is not a silently-copying one. No code change was needed here
+//! versus Plan 01's implementation — it was already correct and already generic across dtypes
+//! (not restricted to numeric), so Task 1's bool support flows through unchanged.
 
 use arrow::array::Array;
 use pyo3::prelude::*;
@@ -18,29 +33,33 @@ use pyo3::types::{PyCapsule, PyDict, PyType};
 use pyo3_arrow::PyTable;
 
 use crate::error::FlintError;
-
-/// The `pandas.ArrowDtype.name` values this phase's numeric happy path accepts.
-///
-/// Note: pandas canonicalizes the constructor alias `"float64[pyarrow]"` to `"double[pyarrow]"`
-/// (Arrow's own type name for float64) — both are accepted at construction time, but `.dtype.name`
-/// always reports `"double[pyarrow]"`.
-const SUPPORTED_ARROW_DTYPE_NAMES: [&str; 2] = ["int64[pyarrow]", "double[pyarrow]"];
+use crate::pandas::{self, ColumnConversionRecord};
 
 /// `flint.Table`: a thin `#[pyclass]` composing `pyo3_arrow::PyTable` (D-01).
 #[pyclass(name = "Table")]
 pub struct Table {
     inner: Py<PyTable>,
+    /// The per-column conversion decision `from_pandas` actually made, retained so Task 2's
+    /// `copy_report()` reports the real outcome rather than re-deriving (possibly-diverging)
+    /// results. Empty for a `Table` not constructed via `from_pandas` (e.g. future PyCapsule
+    /// import, Plan 04).
+    ///
+    /// Not yet read anywhere (Task 2 adds `copy_report()`); silence the dead-code warning until
+    /// then rather than deferring the field itself past Task 1 (from_pandas is the only place
+    /// that can produce it).
+    #[allow(dead_code)]
+    column_reports: Vec<ColumnConversionRecord>,
 }
 
 #[pymethods]
 impl Table {
-    /// Build a `Table` from a pandas DataFrame (numeric happy path only, D-02).
+    /// Build a `Table` from a pandas DataFrame, driving every column's copy-vs-borrow decision
+    /// through `plan_column` (CONV-01/CONV-02, full numeric+bool matrix).
     ///
-    /// Reads each column's already-Arrow-owned memory (via pandas' own
-    /// `DataFrame.__arrow_c_stream__` PyCapsule export) and imports it into the composed
-    /// `pyo3_arrow::PyTable` without copying the data buffers. Any column that is not a supported
-    /// numeric `ArrowDtype` raises a `FlintError::UnsupportedColumn` naming the offending column
-    /// (no silent copy) — the full strict-mode/diagnostics surface is Plan 02.
+    /// Any column outside this phase's numeric/bool scope raises `FlintError::UnsupportedColumn`
+    /// naming the offending column and dtype (no silent copy). `strict` is threaded through but
+    /// not yet enforced here — Task 2's diagnostics surface (`flint.ZeroCopyRequiredError`) adds
+    /// the pre-flight strict-mode check on top of this same per-column plan.
     #[classmethod]
     #[pyo3(signature = (df, strict=false))]
     fn from_pandas(
@@ -49,17 +68,15 @@ impl Table {
         df: &Bound<'_, PyAny>,
         strict: bool,
     ) -> PyResult<Self> {
-        let _ = strict; // full strict-mode surface (DIAG-01) is Plan 02
+        let _ = strict; // strict-mode pre-flight raise is Task 2 (diagnostics.rs)
 
-        reject_unsupported_columns(py, df)?;
-
-        // Delegate the actual Arrow C Data Interface marshalling to pandas' own PyCapsule export
-        // and pyo3-arrow's own PyCapsule import — no hand-rolled FFI_ArrowArray/Schema here.
-        let capsule: Bound<'_, PyCapsule> = df.call_method0("__arrow_c_stream__")?.extract()?;
-        let py_table = PyTable::from_arrow_pycapsule(&capsule)?;
+        let outcome = pandas::from_pandas(py, df)?;
+        let schema = outcome.batch.schema();
+        let py_table = PyTable::try_new(vec![outcome.batch], schema)?;
 
         Ok(Self {
             inner: Py::new(py, py_table)?,
+            column_reports: outcome.records,
         })
     }
 
@@ -159,50 +176,4 @@ impl Table {
             .unwrap_or(0);
         Ok(address)
     }
-}
-
-/// Validate that every column in `df` is a supported numeric `pandas.ArrowDtype` column (Phase 1
-/// happy path: non-null `int64[pyarrow]`/`float64[pyarrow]`).
-///
-/// Raises `FlintError::UnsupportedColumn` naming the offending column and its dtype for the first
-/// column outside this scope, rather than silently copying (Pitfall 1/anti-pattern in
-/// RESEARCH.md/01-PATTERNS.md — bool and any non-`ArrowDtype` column are explicitly out of scope
-/// for this plan and must never be silently accepted).
-fn reject_unsupported_columns(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<()> {
-    let pandas = py.import("pandas")?;
-    let arrow_dtype_type = pandas.getattr("ArrowDtype")?;
-
-    let columns = df.getattr("columns")?;
-    for column_name in columns.try_iter()? {
-        let column_name = column_name?;
-        let column_name_str: String = column_name.str()?.extract()?;
-        let series = df.get_item(&column_name)?;
-        let dtype = series.getattr("dtype")?;
-
-        if !dtype.is_instance(&arrow_dtype_type)? {
-            let dtype_str: String = dtype.str()?.extract()?;
-            return Err(FlintError::UnsupportedColumn {
-                column: column_name_str,
-                dtype: dtype_str,
-                reason: "only pandas.ArrowDtype-backed numeric (int64/float64) columns are \
-                         supported in this phase"
-                    .to_string(),
-            }
-            .into());
-        }
-
-        let dtype_name: String = dtype.getattr("name")?.extract()?;
-        if !SUPPORTED_ARROW_DTYPE_NAMES.contains(&dtype_name.as_str()) {
-            return Err(FlintError::UnsupportedColumn {
-                column: column_name_str,
-                dtype: dtype_name,
-                reason: "only int64[pyarrow]/double[pyarrow] (float64) numeric columns are \
-                         supported in this phase"
-                    .to_string(),
-            }
-            .into());
-        }
-    }
-
-    Ok(())
 }

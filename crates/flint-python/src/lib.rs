@@ -5,6 +5,7 @@
 //! this module.
 
 mod error;
+mod pandas;
 mod table;
 
 use pyo3::prelude::*;
