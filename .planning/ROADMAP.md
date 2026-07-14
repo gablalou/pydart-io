@@ -13,7 +13,7 @@ Flint proves its reason to exist in four vertical slices. Phase 1 delivers the w
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Core Zero-Copy Round-Trip & Interop** - Round-trip a simple numeric/bool DataFrame through Arrow zero-copy, with strict mode, diagnostics, and PyCapsule interop working end-to-end
+- [x] **Phase 1: Core Zero-Copy Round-Trip & Interop** - Round-trip a simple numeric/bool DataFrame through Arrow zero-copy, with strict mode, diagnostics, and PyCapsule interop working end-to-end (completed 2026-07-14)
 - [ ] **Phase 2: Full Dtype & Structural Coverage** - Extend the same conversion pipeline to nulls, strings, categoricals, datetime/timezone, timedelta, and multi-chunk tables
 - [ ] **Phase 3: Parquet IO** - Read and write Parquet files with compression, row-group configuration, statistics, pushdown, and correct logical-type round-trip
 - [ ] **Phase 4: Benchmark & Release Readiness** - Prove the speed/memory claim against pyarrow and ship installable, cross-platform, uv-compatible wheels
@@ -34,7 +34,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. User can export a Table via the Arrow PyCapsule Interface (`__arrow_c_array__`/`__arrow_c_stream__`/`__arrow_c_schema__`) and have it accepted zero-copy by pyarrow, Polars, or DuckDB
   5. User can import a foreign Arrow object (pyarrow Table, Polars DataFrame) via the PyCapsule Interface into a Table with zero-copy
 
-**Plans**: 3/4 plans executed
+**Plans**: 4/4 plans complete
 **Wave 1**
 
 - [x] 01-01-PLAN.md — Walking Skeleton: two-crate workspace + Table shell + thin numeric round-trip + one pyarrow PyCapsule export
@@ -46,7 +46,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Wave 3** *(blocked on Wave 2 completion)*
 
 - [x] 01-03-PLAN.md — Dual zero-copy proofs: Python pointer-identity + Rust allocation-counter (D-06)
-- [ ] 01-04-PLAN.md — PyCapsule interop: from_arrow import + export/import validated against pyarrow, Polars, DuckDB
+- [x] 01-04-PLAN.md — PyCapsule interop: from_arrow import + export/import validated against pyarrow, Polars, DuckDB
 
 ### Phase 2: Full Dtype & Structural Coverage
 
@@ -101,7 +101,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Core Zero-Copy Round-Trip & Interop | 3/4 | In Progress|  |
+| 1. Core Zero-Copy Round-Trip & Interop | 4/4 | Complete   | 2026-07-14 |
 | 2. Full Dtype & Structural Coverage | 0/TBD | Not started | - |
 | 3. Parquet IO | 0/TBD | Not started | - |
 | 4. Benchmark & Release Readiness | 0/TBD | Not started | - |

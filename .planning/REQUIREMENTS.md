@@ -25,8 +25,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### PyCapsule Interop
 
-- [ ] **CAP-01**: User can export a Table via the Arrow PyCapsule Interface (`__arrow_c_array__`/`__arrow_c_stream__`/`__arrow_c_schema__`) for zero-copy handoff to pyarrow, Polars, DuckDB, etc.
-- [ ] **CAP-02**: User can import a foreign Arrow object (pyarrow Table, Polars DataFrame, etc.) via the PyCapsule Interface into a Table with zero-copy
+- [x] **CAP-01**: User can export a Table via the Arrow PyCapsule Interface (`__arrow_c_array__`/`__arrow_c_stream__`/`__arrow_c_schema__`) for zero-copy handoff to pyarrow, Polars, DuckDB, etc.
+- [x] **CAP-02**: User can import a foreign Arrow object (pyarrow Table, Polars DataFrame, etc.) via the PyCapsule Interface into a Table with zero-copy
 
 ### Parquet IO
 
@@ -83,8 +83,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CONV-08 | Phase 2 | Pending |
 | DIAG-01 | Phase 1 | Complete |
 | DIAG-02 | Phase 1 | Complete |
-| CAP-01 | Phase 1 | Pending |
-| CAP-02 | Phase 1 | Pending |
+| CAP-01 | Phase 1 | Complete |
+| CAP-02 | Phase 1 | Complete |
 | PARQ-01 | Phase 3 | Pending |
 | PARQ-02 | Phase 3 | Pending |
 | PARQ-03 | Phase 3 | Pending |
