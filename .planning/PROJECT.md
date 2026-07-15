@@ -46,10 +46,13 @@ Converting a pandas DataFrame to/from an Arrow Table should be zero-copy (or as 
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Arrow-compatible memory format (not custom) | Interop with existing ecosystem (Parquet, Polars, DuckDB) matters more than a bespoke layout | — Pending |
+| Arrow-compatible memory format (not custom) | Interop with existing ecosystem (Parquet, Polars, DuckDB) matters more than a bespoke layout | ✓ Confirmed — Phase 1: `Table` composes `pyo3_arrow::PyTable`, PyCapsule export/import verified zero-copy against pyarrow, Polars, and DuckDB |
 | Narrower/lower-level than Polars | Polars already owns the full DataFrame/query-engine niche; differentiate as a leaner interop-focused library | — Pending |
 | v1 = zero-copy bridge + Parquet IO, no compute kernels | Keep v1 scope tight and provably valuable (benchmarkable) before expanding | — Pending |
-| Success measured by benchmark vs pyarrow | Speed/memory claims need hard numbers, not just "should be faster" | — Pending |
+| Success measured by benchmark vs pyarrow | Speed/memory claims need hard numbers, not just "should be faster" | — Pending (Phase 4) |
+| Genuine zero-copy numpy borrow implemented by hand (not pyo3-arrow's `from_numpy()`) | pyo3-arrow's `from_numpy()` was found to copy via `PrimitiveArray::from_iter_values` even on its contiguous fast path — reading its source was necessary to catch this | ✓ Confirmed — Phase 1: pointer-identity proof + Rust allocation-counter proof both pass, forward and reverse |
+| Multi-chunk `from_pandas` truncation (CR-01) fixed via `arrow::compute::concat`, single-chunk path unchanged | Silent data loss on an ordinary `pd.concat` input was a credibility-breaking bug; the fix must not regress the certified single-chunk zero-copy path | ✓ Confirmed — Phase 1 re-verification: 6-row/2-chunk round-trip fixed, no regression to D-06 pointer-identity proof |
+| DIAG-01/DIAG-02 multi-chunk diagnostics-honesty gap deferred to Phase 2 (CONV-08) via recorded override, not fixed in Phase 1 | Root cause (`plan_column` has no chunk-count visibility) is the same mechanism CONV-08 needs to solve anyway; bundling avoids a throwaway patch | Deferred — tracked in `01-VERIFICATION.md` overrides, carried forward as a Phase 2 blocker/concern |
 
 ## Evolution
 
@@ -69,4 +72,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-13 after initialization*
+*Last updated: 2026-07-15 after Phase 1*
