@@ -85,6 +85,7 @@ Recent decisions affecting current work:
 - [Phase 01 P04]: Untrusted-capsule validation errors are remapped onto diagnostics::PyFlintError (the Python-visible flint.FlintError), not crate::error::FlintError (the Plan 01/02 internal thiserror enum, which maps to builtin PyValueError/PyTypeError and is never visible as flint.FlintError)
 - [Phase 01 P04]: DuckDB Open Question 1 / Assumption A2 resolved empirically: pinned duckdb 1.5.4 consumes a flint Table natively via duckdb.sql("FROM <obj>").arrow().read_all(), no pyarrow intermediary needed -- documented fallback implemented but unused
 - [Phase ?]: [Quick 260715-smf] Concatenate multi-batch columns via arrow::compute::concat rather than rejecting multi-chunk input outright (fixes CR-01 silent truncation), while keeping the single-batch fast path as a direct Arc clone with no concat call
+- [Phase 01 verification]: DIAG-01/DIAG-02 multi-chunk diagnostics-honesty gap (strict mode / copy_report don't detect the CR-01 fix's concat copy for multi-chunk columns) accepted via recorded override rather than fixed immediately -- root cause (plan_column has no chunk-count visibility) is the same mechanism CONV-08 needs to solve anyway, so bundling the fix there avoids a throwaway patch. Accepted by John Columna 2026-07-15.
 
 ### Pending Todos
 
@@ -92,6 +93,7 @@ None yet.
 
 ### Blockers/Concerns
 
+- Phase 2 (carried forward from Phase 1 verification override): CONV-08 (multi-chunk Table<->pandas) must also make `plan_column`/`ColumnConversionRecord` chunk-count-aware so `strict=True` and `copy_report()` honestly reflect the concat copy for multi-chunk columns (DIAG-01/DIAG-02) -- this was deferred here rather than fixed in Phase 1, see 01-VERIFICATION.md overrides.
 - Phase 3 (research-flagged): categorical/dictionary Parquet round-trip edge cases and tz-aware timestamp handling warrant verification against current pyarrow issues (#35259, #1688) at plan time.
 - Phase 3 (research-flagged): confirm pandas ArrowDtype import-side support status (pandas 3.0.x) before finalizing pandas-interop reverse direction — may affect Phase 2 design already, verify at Phase 2 plan time too.
 - Phase 4 (research-flagged): benchmarking methodology (criterion/pytest-benchmark/codspeed) and manylinux/glibc floor are MEDIUM-confidence, task-derived recommendations — validate current best practice at plan time.
