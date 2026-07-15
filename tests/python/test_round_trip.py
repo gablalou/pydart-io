@@ -94,3 +94,20 @@ def test_from_pandas_numpy_backed_bool_round_trips_via_copy_fallback():
     result = table.to_pandas()
 
     assert result["a"].tolist() == df["a"].tolist()
+
+
+def test_from_pandas_preserves_all_rows_of_multi_chunk_arrow_backed_column():
+    """CR-01 regression: `pd.concat` of two Arrow-backed frames produces a 2-chunk
+    `ChunkedArray` (pandas/pyarrow never auto-rechunk on concat). The pre-fix
+    `import_column_via_pandas_stream` silently returned only the first `RecordBatch`'s column,
+    truncating 6 logical rows down to 3 with no exception. This test builds exactly that
+    scenario and asserts the full row count and values survive the round trip."""
+    df1 = pd.DataFrame({"a": pd.array([1, 2, 3], dtype="int64[pyarrow]")})
+    df2 = pd.DataFrame({"a": pd.array([4, 5, 6], dtype="int64[pyarrow]")})
+    df = pd.concat([df1, df2], ignore_index=True)
+
+    table = flint.Table.from_pandas(df)
+    result = table.to_pandas()
+
+    assert len(result) == 6
+    assert result["a"].tolist() == [1, 2, 3, 4, 5, 6]
