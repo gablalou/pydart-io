@@ -180,6 +180,15 @@ pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandas
 /// the `RequiresCopy` fallback for numpy columns (numpy bool, non-contiguous numeric): in that
 /// case pandas'/pyarrow's own conversion machinery performs the actual copy, so this project
 /// never hand-writes bit-packing or generic numeric-copy logic (RESEARCH.md "Don't Hand-Roll").
+///
+/// A column's `__arrow_c_stream__` export may yield more than one `RecordBatch` (e.g. a
+/// `pd.concat` of two Arrow-backed frames produces a 2-chunk `ChunkedArray`, never auto-rechunked
+/// by pandas/pyarrow). Every batch is accounted for: a single-batch stream returns that batch's
+/// column directly (an `Arc<dyn Array>` clone -- genuinely zero-copy, no allocation), while a
+/// multi-batch stream is concatenated into one contiguous array via `arrow::compute::concat` (an
+/// honest copy -- a multi-chunk column was never one contiguous buffer to begin with, so this does
+/// not regress the single-chunk zero-copy path). Silently returning only the first batch would
+/// truncate every row after it (CR-01).
 fn import_column_via_pandas_stream(
     py: Python<'_>,
     df: &Bound<'_, PyAny>,
@@ -191,11 +200,22 @@ fn import_column_via_pandas_stream(
         .call_method0("__arrow_c_stream__")?
         .extract()?;
     let py_table = PyTable::from_arrow_pycapsule(&capsule)?;
-    let batch = py_table
-        .batches()
-        .first()
-        .ok_or_else(|| FlintError::Other("column stream produced no record batches".to_string()))?;
-    Ok(batch.column(0).clone())
+    let batches = py_table.batches();
+
+    if batches.is_empty() {
+        return Err(
+            FlintError::Other("column stream produced no record batches".to_string()).into(),
+        );
+    }
+
+    if batches.len() == 1 {
+        return Ok(batches[0].column(0).clone());
+    }
+
+    let columns: Vec<ArrayRef> = batches.iter().map(|b| b.column(0).clone()).collect();
+    let column_refs: Vec<&dyn Array> = columns.iter().map(|c| c.as_ref()).collect();
+    let concatenated = arrow::compute::concat(&column_refs).map_err(FlintError::from)?;
+    Ok(concatenated)
 }
 
 /// Newtype around a borrowed numpy array's `Py<PyArray1<T>>` handle, used solely as the
