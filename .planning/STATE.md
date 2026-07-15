@@ -5,16 +5,15 @@ milestone_name: milestone
 current_phase: 01
 current_phase_name: core-zero-copy-round-trip-interop
 status: verifying
-stopped_at: Completed 01-04-PLAN.md
-last_updated: "2026-07-14T07:05:44.479Z"
+stopped_at: Completed quick task 260715-smf (fix CR-01 from_pandas silent truncation)
+last_updated: "2026-07-15T13:16:50.731Z"
 last_activity: 2026-07-14
 last_activity_desc: Completed 01-02-PLAN.md
 progress:
-  total_phases: 4
-  completed_phases: 1
-  total_plans: 4
+  total_phases: 1
+  completed_phases: 0
+  total_plans: 5
   completed_plans: 4
-  percent: 25
 ---
 
 # Project State
@@ -59,6 +58,11 @@ Progress: [█████░░░░░] 50%
 | Phase 01 P02 | 35 | 2 tasks | 12 files |
 | Phase 01 P03 | 20min | 2 tasks | 4 files |
 | Phase 01 P04 | 10min | 2 tasks | 5 files |
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase quick P260715-smf | 12min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -80,6 +84,7 @@ Recent decisions affecting current work:
 - [Phase 01 P04]: from_arrow's obj parameter is typed &Bound<PyAny> (not pyo3_arrow::PyTable) so the extraction call site is explicit and its errors can be remapped onto flint.FlintError -- binding as PyTable directly would run extraction during PyO3's own argument-binding step, before any remap is possible
 - [Phase 01 P04]: Untrusted-capsule validation errors are remapped onto diagnostics::PyFlintError (the Python-visible flint.FlintError), not crate::error::FlintError (the Plan 01/02 internal thiserror enum, which maps to builtin PyValueError/PyTypeError and is never visible as flint.FlintError)
 - [Phase 01 P04]: DuckDB Open Question 1 / Assumption A2 resolved empirically: pinned duckdb 1.5.4 consumes a flint Table natively via duckdb.sql("FROM <obj>").arrow().read_all(), no pyarrow intermediary needed -- documented fallback implemented but unused
+- [Phase ?]: [Quick 260715-smf] Concatenate multi-batch columns via arrow::compute::concat rather than rejecting multi-chunk input outright (fixes CR-01 silent truncation), while keeping the single-batch fast path as a direct Arc clone with no concat call
 
 ### Pending Todos
 
@@ -91,6 +96,12 @@ None yet.
 - Phase 3 (research-flagged): confirm pandas ArrowDtype import-side support status (pandas 3.0.x) before finalizing pandas-interop reverse direction — may affect Phase 2 design already, verify at Phase 2 plan time too.
 - Phase 4 (research-flagged): benchmarking methodology (criterion/pytest-benchmark/codspeed) and manylinux/glibc floor are MEDIUM-confidence, task-derived recommendations — validate current best practice at plan time.
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260715-smf | Fix CR-01: from_pandas silently truncates multi-chunk Arrow-backed pandas columns to only the first chunk | 2026-07-15 | b5df2da | [260715-smf-fix-cr-01-from-pandas-silently-truncates](./quick/260715-smf-fix-cr-01-from-pandas-silently-truncates/) |
+
 ## Deferred Items
 
 Items acknowledged and carried forward from previous milestone close:
@@ -101,6 +112,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-14T07:05:44.473Z
-Stopped at: Completed 01-04-PLAN.md
+Last session: 2026-07-15T13:16:50.725Z
+Stopped at: Completed quick task 260715-smf (fix CR-01 from_pandas silent truncation)
 Resume file: None
