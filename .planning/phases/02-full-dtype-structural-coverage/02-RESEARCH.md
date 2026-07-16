@@ -492,7 +492,7 @@ def datetime_unit(dtype) -> str:
 
 **All other claims in this research were either empirically reproduced against this repo's pinned pandas 3.0.3/pyarrow 25.0.0/arrow 59.1.0 stack in this session, or cited directly from official arrow-rs/arrow-schema docs.rs pages and pandas' own release notes** — no other claim in this document should be treated as unverified training-data recall.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should `to_pandas`'s diagnostics/strict-mode surface a copy signal for the dictionary-column reconstruction path (Pitfall 4's trade-off)?**
    - What we know: `to_pandas` currently treats `strict`/copy-diagnostics as a universal no-op because every output column is "already Arrow memory" (Phase 1's documented reasoning). The verified fix for D-17 (per-column `types_mapper` returning `None` for dictionary columns) causes pyarrow's own default reconstruction to run for that column, which does NOT appear to be zero-copy for the codes buffer.
