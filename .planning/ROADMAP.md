@@ -66,7 +66,27 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. User can convert datetime, timezone-aware timestamp, and timedelta columns to/from an Arrow Table correctly
   5. User can convert a Table with multiple chunks per column (ChunkedArray) to/from pandas correctly
 
-**Plans**: TBD
+**Plans**: 5 plans
+
+**Wave 1**
+
+- [ ] 02-01-PLAN.md — Nulls + isinstance-first classify_dtype foundation + masked-extension honest rejection + A1 concat probe (CONV-03)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 02-02-PLAN.md — Object/string columns + Flint-owned D-11 content validation (CONV-04)
+
+**Wave 3** *(blocked on Wave 1; shares core files, runs after Wave 2)*
+
+- [ ] 02-03-PLAN.md — Categorical fidelity: ordered flag + category order + code width (Pitfall 3/4 fixes) (CONV-05)
+
+**Wave 4** *(shares core files, runs after Wave 3)*
+
+- [ ] 02-04-PLAN.md — Datetime/tz/timedelta ns-only gating + pandas-3.0 rejection messaging (CONV-06, CONV-07)
+
+**Wave 5** *(blocked on Waves 1-4)*
+
+- [ ] 02-05-PLAN.md — Multi-chunk diagnostics-awareness (Strategy B): closes DIAG-01/02 honesty gap (CONV-08)
 
 ### Phase 3: Parquet IO
 
@@ -106,6 +126,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Core Zero-Copy Round-Trip & Interop | 5/5 | Complete    | 2026-07-14 |
-| 2. Full Dtype & Structural Coverage | 0/TBD | Not started | - |
+| 2. Full Dtype & Structural Coverage | 0/5 | Not started | - |
 | 3. Parquet IO | 0/TBD | Not started | - |
 | 4. Benchmark & Release Readiness | 0/TBD | Not started | - |
