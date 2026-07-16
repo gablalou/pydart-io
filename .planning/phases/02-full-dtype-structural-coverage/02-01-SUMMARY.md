@@ -173,3 +173,9 @@ None - no external service configuration required.
 ---
 *Phase: 02-full-dtype-structural-coverage*
 *Completed: 2026-07-16*
+
+## Self-Check: PASSED
+
+All created/modified files confirmed present on disk (pandas.rs, error.rs, Cargo.toml,
+concat_generic_arrays.rs, test_nulls.py, this SUMMARY.md). All 4 task commits confirmed present
+in `git log --oneline --all` (170a0f2, 4a1257c, a6022cd, d6c1062).
