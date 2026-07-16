@@ -66,11 +66,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. User can convert datetime, timezone-aware timestamp, and timedelta columns to/from an Arrow Table correctly
   5. User can convert a Table with multiple chunks per column (ChunkedArray) to/from pandas correctly
 
-**Plans**: 5 plans
+**Plans**: 1/5 plans executed
 
 **Wave 1**
 
-- [ ] 02-01-PLAN.md — Nulls + isinstance-first classify_dtype foundation + masked-extension honest rejection + A1 concat probe (CONV-03)
+- [x] 02-01-PLAN.md — Nulls + isinstance-first classify_dtype foundation + masked-extension honest rejection + A1 concat probe (CONV-03)
 
 **Wave 2** *(blocked on Wave 1)*
 
@@ -126,6 +126,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Core Zero-Copy Round-Trip & Interop | 5/5 | Complete    | 2026-07-14 |
-| 2. Full Dtype & Structural Coverage | 0/5 | Not started | - |
+| 2. Full Dtype & Structural Coverage | 1/5 | In Progress|  |
 | 3. Parquet IO | 0/TBD | Not started | - |
 | 4. Benchmark & Release Readiness | 0/TBD | Not started | - |
