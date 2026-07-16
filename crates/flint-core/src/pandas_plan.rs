@@ -29,6 +29,13 @@ pub enum ArrowKind {
     /// Boolean. Called out as its own variant (not folded into `Numeric`) because numpy packs
     /// bool at 1 byte/element while Arrow packs it at 1 bit/element -- see RESEARCH.md Pitfall 1.
     Bool,
+    /// String/text data: covers both Arrow-backed `string[pyarrow]`/`large_string[pyarrow]`
+    /// columns (already Arrow memory) and legacy numpy `object`-dtype columns of Python `str`
+    /// values (no Arrow-compatible physical layout, requires a copy). See D-10/D-11 and
+    /// RESEARCH.md Pitfall 2 for the content-validation requirement specific to the numpy-object
+    /// case, enforced by `crates/flint-python/src/pandas.rs`'s
+    /// `validate_object_column_contents`, not by this matrix.
+    String,
 }
 
 /// The result of planning a single column's conversion: can it be borrowed as-is (zero-copy),
@@ -57,6 +64,8 @@ pub enum ColumnPlan {
 /// | Numpy   | Numeric | true       | `ZeroCopyBorrow`|
 /// | Numpy   | Numeric | false      | `RequiresCopy`  |
 /// | Numpy   | Bool    | (n/a)      | `RequiresCopy`  |
+/// | Arrow   | String  | (n/a)      | `ZeroCopyBorrow`|
+/// | Numpy   | String  | (n/a)      | `RequiresCopy`  |
 ///
 /// `is_contiguous` is ignored for `DtypeBackend::Arrow` columns (already Arrow's own memory,
 /// always zero-copy-borrowable at this phase's scope) and for `Numpy`+`Bool` (bit-packing means
@@ -74,6 +83,13 @@ pub fn plan_column(dtype_backend: DtypeBackend, arrow_kind: ArrowKind, is_contig
         (DtypeBackend::Numpy, ArrowKind::Bool) => ColumnPlan::RequiresCopy {
             reason: "numpy bool is stored as 1 byte per element while Arrow bool is bit-packed \
                      at 1 bit per element; converting requires a repacking copy"
+                .to_string(),
+        },
+        (DtypeBackend::Arrow, ArrowKind::String) => ColumnPlan::ZeroCopyBorrow,
+        (DtypeBackend::Numpy, ArrowKind::String) => ColumnPlan::RequiresCopy {
+            reason: "numpy object-dtype string column stores boxed Python str pointers with no \
+                     contiguous Arrow-compatible UTF-8 buffer; materializing an Arrow string \
+                     array requires a copy"
                 .to_string(),
         },
     }
@@ -132,6 +148,31 @@ mod tests {
     fn plan_column_non_contiguous_numpy_numeric_requires_copy() {
         assert!(matches!(
             plan_column(DtypeBackend::Numpy, ArrowKind::Numeric, false),
+            ColumnPlan::RequiresCopy { .. }
+        ));
+    }
+
+    #[test]
+    fn plan_column_arrow_string_is_zero_copy_borrow() {
+        assert_eq!(
+            plan_column(DtypeBackend::Arrow, ArrowKind::String, true),
+            ColumnPlan::ZeroCopyBorrow
+        );
+        // is_contiguous is irrelevant for Arrow-backed columns.
+        assert_eq!(
+            plan_column(DtypeBackend::Arrow, ArrowKind::String, false),
+            ColumnPlan::ZeroCopyBorrow
+        );
+    }
+
+    #[test]
+    fn plan_column_numpy_string_requires_copy() {
+        assert!(matches!(
+            plan_column(DtypeBackend::Numpy, ArrowKind::String, true),
+            ColumnPlan::RequiresCopy { .. }
+        ));
+        assert!(matches!(
+            plan_column(DtypeBackend::Numpy, ArrowKind::String, false),
             ColumnPlan::RequiresCopy { .. }
         ));
     }
