@@ -21,3 +21,10 @@ allocation-counter = "0.8"
 [[test]]
 name = "zero_copy_alloc"
 path = "../../tests/rust/zero_copy_alloc.rs"
+
+# Assumption A1 probe (RESEARCH.md Assumptions Log A1): proves arrow::compute::concat handles
+# DictionaryArray/TimestampArray(tz)/DurationArray generically, de-risking Plans 03-04's reliance
+# on the existing multi-chunk concat fallback -- mirrors the zero_copy_alloc entry above.
+[[test]]
+name = "concat_generic_arrays"
+path = "../../tests/rust/concat_generic_arrays.rs"

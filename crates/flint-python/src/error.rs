@@ -6,9 +6,11 @@
 //! D-03's "clear exception naming the offending column/dtype" achievable consistently, and gives
 //! later plans (strict mode, diagnostics) one place to extend.
 
-use pyo3::exceptions::{PyNotImplementedError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyNotImplementedError, PyValueError};
 use pyo3::PyErr;
 use thiserror::Error;
+
+use crate::diagnostics::PyFlintError;
 
 /// All errors raised by the Rust side of the `flint` extension.
 #[derive(Debug, Error)]
@@ -41,7 +43,10 @@ impl From<FlintError> for PyErr {
     fn from(err: FlintError) -> PyErr {
         match &err {
             FlintError::NotImplemented(_) => PyNotImplementedError::new_err(err.to_string()),
-            FlintError::UnsupportedColumn { .. } => PyTypeError::new_err(err.to_string()),
+            // `flint.FlintError` (not a builtin `TypeError`) so callers get an honest, catchable
+            // `flint`-owned exception naming the offending column/dtype (D-08 / RESEARCH.md
+            // Pitfall 1) instead of relying on builtin exception hierarchy semantics.
+            FlintError::UnsupportedColumn { .. } => PyFlintError::new_err(err.to_string()),
             FlintError::Arrow(_) => PyValueError::new_err(err.to_string()),
             FlintError::Other(_) => PyValueError::new_err(err.to_string()),
         }

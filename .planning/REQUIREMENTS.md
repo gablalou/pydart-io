@@ -11,7 +11,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [x] **CONV-01**: User can convert a pandas DataFrame with non-null numeric/bool columns to an Arrow Table with true zero-copy (no data duplication)
 - [x] **CONV-02**: User can convert numeric/bool Arrow Table columns back to a pandas DataFrame with true zero-copy
-- [ ] **CONV-03**: User can convert pandas columns with nulls (numeric) to/from an Arrow Table with correct null handling
+- [x] **CONV-03**: User can convert pandas columns with nulls (numeric) to/from an Arrow Table with correct null handling
 - [ ] **CONV-04**: User can convert object/string dtype columns to/from an Arrow Table with correct value and null handling
 - [ ] **CONV-05**: User can convert categorical dtype columns to/from Arrow dictionary-encoded columns
 - [ ] **CONV-06**: User can convert datetime and timezone-aware timestamp columns to/from an Arrow Table
@@ -75,7 +75,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 |-------------|-------|--------|
 | CONV-01 | Phase 1 | Complete |
 | CONV-02 | Phase 1 | Complete |
-| CONV-03 | Phase 2 | Pending |
+| CONV-03 | Phase 2 | Complete |
 | CONV-04 | Phase 2 | Pending |
 | CONV-05 | Phase 2 | Pending |
 | CONV-06 | Phase 2 | Pending |

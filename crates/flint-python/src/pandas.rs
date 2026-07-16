@@ -81,14 +81,95 @@ pub struct FromPandasOutcome {
 /// outside this phase's numeric/bool scope with a `FlintError::UnsupportedColumn` naming the
 /// column and dtype (no silent copy/acceptance of out-of-scope dtypes, matching Plan 01's
 /// established rejection behavior).
+///
+/// Dispatch is **isinstance-first**, driven by the pandas dtype's Python TYPE, NOT by
+/// `dtype.kind` alone (RESEARCH.md "Pattern: isinstance-first dtype classification" /
+/// Pitfall 1). `dtype.kind` alone cannot distinguish an `ArrowDtype` int64 column (in scope,
+/// D-07) from a masked `Int64` extension column (out of scope, D-08) -- both report
+/// `kind == 'i'`. The dispatch order below is load-bearing:
+///
+/// 1. `isinstance(dtype, pandas.ArrowDtype)` -> `DtypeBackend::Arrow`, sub-classified via
+///    `pyarrow.types` predicates on `dtype.pyarrow_dtype` (not `dtype.kind`).
+///    <!-- EXTENSION POINT: Plans 02 (string[pyarrow]) / 04 (timestamp/duration[pyarrow])
+///    insert their `pa.types.is_*` sub-kind checks HERE, before the Numeric/Bool fallthrough
+///    below rejects anything else in this branch. -->
+/// 2. else `isinstance(dtype, pandas.api.extensions.ExtensionDtype)` -> reject. This branch
+///    catches masked `Int64`/`boolean`/`Float64` (D-08) and, for now, also
+///    `CategoricalDtype`/`DatetimeTZDtype` (non-Arrow extension dtypes).
+///    <!-- EXTENSION POINT: Plan 03 (categorical) / Plan 04 (DatetimeTZDtype-if-applicable)
+///    MUST insert their specific isinstance checks ABOVE this generic reject branch, exactly
+///    as this comment says -- inserting below here would never be reached. -->
+/// 3. else it is a plain numpy dtype -> dispatch on `dtype.kind` as Phase 1 already does.
 fn classify_dtype(
+    py: Python<'_>,
     dtype: &Bound<'_, PyAny>,
     arrow_dtype_type: &Bound<'_, PyAny>,
+    extension_dtype_type: &Bound<'_, PyAny>,
     column_name: &str,
 ) -> PyResult<(DtypeBackend, ArrowKind, String)> {
     let dtype_str: String = dtype.str()?.extract()?;
-    let kind: String = dtype.getattr("kind")?.extract()?;
 
+    // (1) pandas.ArrowDtype -- sub-classify via pyarrow.types predicates on the wrapped
+    // pyarrow DataType, never via dtype.kind (RESEARCH.md Pattern, isinstance-first dispatch).
+    if dtype.is_instance(arrow_dtype_type)? {
+        let pyarrow_dtype = dtype.getattr("pyarrow_dtype")?;
+        let pyarrow_types = py.import("pyarrow")?.getattr("types")?;
+
+        let is_integer: bool = pyarrow_types
+            .call_method1("is_integer", (&pyarrow_dtype,))?
+            .extract()?;
+        let is_floating: bool = pyarrow_types
+            .call_method1("is_floating", (&pyarrow_dtype,))?
+            .extract()?;
+        let is_boolean: bool = pyarrow_types
+            .call_method1("is_boolean", (&pyarrow_dtype,))?
+            .extract()?;
+
+        let arrow_kind = if is_integer || is_floating {
+            ArrowKind::Numeric
+        } else if is_boolean {
+            ArrowKind::Bool
+            // EXTENSION POINT: Plans 02/04 add pa.types.is_string/is_large_string ->
+            // ArrowKind::String, is_timestamp -> ArrowKind::Timestamp{tz}, is_duration ->
+            // ArrowKind::Duration sub-kinds here, before the final reject fallthrough below.
+        } else {
+            return Err(FlintError::UnsupportedColumn {
+                column: column_name.to_string(),
+                dtype: dtype_str,
+                reason: "only numeric (int/uint/float) and boolean ArrowDtype columns are \
+                         supported in this phase"
+                    .to_string(),
+            }
+            .into());
+        };
+
+        return Ok((DtypeBackend::Arrow, arrow_kind, dtype_str));
+    }
+
+    // (2) Any other pandas ExtensionDtype (masked Int64/boolean/Float64, and for now also
+    // CategoricalDtype/DatetimeTZDtype which later plans will intercept ABOVE this branch)
+    // is rejected here, honestly, BEFORE the plain-numpy `.values.flags` access in
+    // `from_pandas` is ever reached (D-08 / Pitfall 1: masked extension arrays like
+    // `IntegerArray`/`BooleanArray` have no `.flags` attribute and previously crashed with a
+    // raw AttributeError instead of a clean FlintError).
+    if dtype.is_instance(extension_dtype_type)? {
+        let dtype_type_name: String = dtype.get_type().name()?.extract()?;
+        return Err(FlintError::UnsupportedColumn {
+            column: column_name.to_string(),
+            dtype: dtype_str,
+            reason: format!(
+                "pandas masked/extension dtype {dtype_type_name} is not supported in this \
+                 phase (pandas masked nullable extension dtypes such as Int64/boolean/Float64 \
+                 are out of scope; use an ArrowDtype-backed column, e.g. \
+                 dtype=\"int64[pyarrow]\", for nullable numeric support)"
+            ),
+        }
+        .into());
+    }
+
+    // (3) Plain numpy dtype -- dispatch on `.kind` exactly as Phase 1 does. Object ('O') and
+    // temporal ('M'/'m') kinds remain rejected here for now; Plans 02/04 add them.
+    let kind: String = dtype.getattr("kind")?.extract()?;
     let arrow_kind = match kind.as_str() {
         "b" => ArrowKind::Bool,
         "i" | "u" | "f" => ArrowKind::Numeric,
@@ -104,13 +185,7 @@ fn classify_dtype(
         }
     };
 
-    let dtype_backend = if dtype.is_instance(arrow_dtype_type)? {
-        DtypeBackend::Arrow
-    } else {
-        DtypeBackend::Numpy
-    };
-
-    Ok((dtype_backend, arrow_kind, dtype_str))
+    Ok((DtypeBackend::Numpy, arrow_kind, dtype_str))
 }
 
 /// Convert an entire pandas DataFrame into a `RecordBatch`, driving every column's
@@ -118,6 +193,10 @@ fn classify_dtype(
 pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandasOutcome> {
     let pandas = py.import("pandas")?;
     let arrow_dtype_type = pandas.getattr("ArrowDtype")?;
+    let extension_dtype_type = pandas
+        .getattr("api")?
+        .getattr("extensions")?
+        .getattr("ExtensionDtype")?;
 
     let columns = df.getattr("columns")?;
     let mut fields = Vec::new();
@@ -130,8 +209,13 @@ pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandas
         let series = df.get_item(&column_name)?;
         let dtype = series.getattr("dtype")?;
 
-        let (dtype_backend, arrow_kind, dtype_str) =
-            classify_dtype(&dtype, &arrow_dtype_type, &column_name_str)?;
+        let (dtype_backend, arrow_kind, dtype_str) = classify_dtype(
+            py,
+            &dtype,
+            &arrow_dtype_type,
+            &extension_dtype_type,
+            &column_name_str,
+        )?;
 
         let is_contiguous = match dtype_backend {
             // Irrelevant for Arrow-backed columns -- plan_column ignores it in that branch.
