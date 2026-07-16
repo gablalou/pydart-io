@@ -300,6 +300,12 @@ pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandas
 /// honest copy -- a multi-chunk column was never one contiguous buffer to begin with, so this does
 /// not regress the single-chunk zero-copy path). Silently returning only the first batch would
 /// truncate every row after it (CR-01).
+///
+/// A genuinely empty (0-row) column's stream yields ZERO record batches (confirmed empirically
+/// for an empty `object`-dtype column, CONV-04's flagged empty-column edge case) even though the
+/// stream's schema is still available -- this is a valid, common case (an empty DataFrame column
+/// is not a malformed stream), so it is handled by constructing a genuinely empty array of the
+/// column's Arrow type directly from the schema, rather than treated as an error.
 fn import_column_via_pandas_stream(
     py: Python<'_>,
     df: &Bound<'_, PyAny>,
@@ -311,12 +317,11 @@ fn import_column_via_pandas_stream(
         .call_method0("__arrow_c_stream__")?
         .extract()?;
     let py_table = PyTable::from_arrow_pycapsule(&capsule)?;
-    let batches = py_table.batches();
+    let (batches, schema) = py_table.into_inner();
 
     if batches.is_empty() {
-        return Err(
-            FlintError::Other("column stream produced no record batches".to_string()).into(),
-        );
+        let data_type = schema.field(0).data_type();
+        return Ok(arrow::array::new_empty_array(data_type));
     }
 
     if batches.len() == 1 {
