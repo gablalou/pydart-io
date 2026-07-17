@@ -27,7 +27,7 @@ use std::sync::Arc;
 use arrow::array::{Array, ArrayRef, PrimitiveArray};
 use arrow::buffer::{Buffer, ScalarBuffer};
 use arrow::datatypes::{
-    Field, Float32Type, Float64Type, Int16Type, Int32Type, Int64Type, Int8Type, Schema,
+    DataType, Field, Float32Type, Float64Type, Int16Type, Int32Type, Int64Type, Int8Type, Schema,
     SchemaRef, UInt16Type, UInt32Type, UInt64Type, UInt8Type,
 };
 use arrow::record_batch::RecordBatch;
@@ -292,11 +292,20 @@ pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandas
             _ => import_column_via_pandas_stream(py, df, &column_name)?,
         };
 
-        fields.push(Field::new(
-            &column_name_str,
-            array.data_type().clone(),
-            array.null_count() > 0,
-        ));
+        // D-17 / Pitfall 3: a dictionary-typed column's `ordered` flag lives on arrow-schema's
+        // `Field` (`Field::dict_is_ordered`), NOT on `DataType::Dictionary` itself -- it must be
+        // sourced from the pandas source dtype's own `.ordered` attribute (only meaningful for a
+        // DtypeBackend::Categorical column) and propagated explicitly via `Field::new_dictionary`
+        // + `with_dict_is_ordered`, rather than the generic `Field::new(..,
+        // array.data_type().clone(), ..)` this used to unconditionally use for every column
+        // (which silently dropped `ordered` for every categorical, confirmed empirically in
+        // RESEARCH.md Pitfall 3 via a direct PyCapsule export with no `to_pandas` involved).
+        let is_ordered = if matches!(dtype_backend, DtypeBackend::Categorical) {
+            Some(dtype.getattr("ordered")?.extract::<bool>()?)
+        } else {
+            None
+        };
+        fields.push(build_field(&column_name_str, array.as_ref(), is_ordered));
         arrays.push(array);
     }
 
@@ -304,6 +313,29 @@ pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandas
     let batch = RecordBatch::try_new(schema, arrays).map_err(FlintError::from)?;
 
     Ok(FromPandasOutcome { batch, records })
+}
+
+/// Build a column's `Field`, propagating the dictionary `ordered` flag (D-17 / Pitfall 3) for
+/// `DataType::Dictionary`-typed columns.
+///
+/// `Field::dict_is_ordered` lives on `Field`, not `DataType` -- `array.data_type().clone()`
+/// alone can never carry it forward, so any `DataType::Dictionary` column MUST be constructed
+/// via `Field::new_dictionary(..).with_dict_is_ordered(..)` instead of the generic
+/// `Field::new(.., array.data_type().clone(), ..)` every other column uses unchanged.
+/// `is_ordered` is `None` for any non-categorical column (defaults to `false`, matching
+/// arrow-rs's own default) and `Some(dtype.ordered)` for a genuine pandas `Categorical` column
+/// (sourced from the pandas source dtype in `from_pandas`, not re-derived here).
+fn build_field(column_name: &str, array: &dyn Array, is_ordered: Option<bool>) -> Field {
+    match array.data_type() {
+        DataType::Dictionary(key_type, value_type) => Field::new_dictionary(
+            column_name,
+            (**key_type).clone(),
+            (**value_type).clone(),
+            array.null_count() > 0,
+        )
+        .with_dict_is_ordered(is_ordered.unwrap_or(false)),
+        other => Field::new(column_name, other.clone(), array.null_count() > 0),
+    }
 }
 
 /// Import a single column's data as an Arrow array by isolating it into a single-column
