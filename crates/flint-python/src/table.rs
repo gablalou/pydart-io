@@ -26,10 +26,15 @@
 //! fallback; the spike confirms it is not a silently-copying one. No code change was needed here
 //! versus Plan 01's implementation — it was already correct and already generic across dtypes
 //! (not restricted to numeric), so Task 1's bool support flows through unchanged.
+//!
+//! **Exception (D-17, OQ1, Plan 03):** a dictionary-typed (`Categorical`) column is the one case
+//! where `to_pandas` does NOT reconstruct via `pandas.ArrowDtype` -- see the `to_pandas` method's
+//! own doc comment below for why, and why that documented copy is intentional and not surfaced
+//! in `copy_report()`.
 
 use arrow::array::Array;
 use pyo3::prelude::*;
-use pyo3::types::{PyCapsule, PyDict, PyType};
+use pyo3::types::{PyCapsule, PyCFunction, PyDict, PyTuple, PyType};
 use pyo3_arrow::PyTable;
 
 use crate::diagnostics;
@@ -121,10 +126,28 @@ impl Table {
     /// SUMMARY Deviations for the full reasoning) -- unlike `from_pandas`, which must classify an
     /// incoming column's backend/contiguity before it knows whether a copy is required.
     /// `strict` is accepted for API symmetry with `from_pandas` but is a no-op here: `to_pandas`
-    /// is unconditionally zero-copy (confirmed above), so it can never have anything to reject.
+    /// is unconditionally zero-copy for every non-dictionary column (confirmed above), so it can
+    /// never have anything to reject.
+    ///
+    /// **D-17 / Pitfall 4 / OQ1:** the blanket `types_mapper=pandas.ArrowDtype` used through
+    /// Plan 02 reconstructs a dictionary-typed (`Categorical`) column as a `pandas.ArrowDtype`
+    /// dictionary column, NOT a real `pd.Categorical` -- it has no `.cat.ordered`/`.cat.categories`/
+    /// `.cat.codes` accessor surface at all, silently failing D-17's fidelity contract. The
+    /// `types_mapper` below is instead a per-column-type-aware callable: it returns `None` for
+    /// `pyarrow.types.is_dictionary` columns (falling through to pyarrow's own default,
+    /// non-ArrowDtype reconstruction, which produces a real `pd.Categorical` with exact
+    /// `ordered`/`categories`/`codes`-width fidelity -- verified in RESEARCH.md Pitfall 4) and
+    /// `pandas.ArrowDtype(t)` for every other column (preserving Phase 1/Plan 01-02 behavior
+    /// unchanged). **OQ1 recorded decision:** pyarrow's own default dictionary reconstruction is
+    /// NOT zero-copy for the codes buffer (verified in RESEARCH.md) -- this is an intentional,
+    /// documented copy, not surfaced in `copy_report()`/`strict`, which both remain a no-op for
+    /// `to_pandas` exactly as before this fix. `strict=True` therefore does not raise for a
+    /// categorical column even though the reconstruction copies; this is the deliberate,
+    /// recorded answer to Open Question 1 (see `tests/python/test_categorical.py`), chosen so
+    /// this is never rediscovered as a surprise gap the way DIAG-01/02 was in Phase 1.
     #[pyo3(signature = (strict=false))]
     fn to_pandas(&self, py: Python<'_>, strict: bool) -> PyResult<Py<PyAny>> {
-        let _ = strict; // unconditionally zero-copy; see doc comment above
+        let _ = strict; // documented no-op (OQ1); see doc comment above
 
         let batches = self.inner.bind(py).get().batches().to_vec();
         let schema = batches.first().map(|batch| batch.schema()).ok_or_else(|| {
@@ -133,10 +156,36 @@ impl Table {
         let owned_table = PyTable::try_new(batches, schema)?;
         let pa_table = owned_table.into_pyarrow(py)?;
 
-        let pandas = py.import("pandas")?;
-        let arrow_dtype = pandas.getattr("ArrowDtype")?;
+        // D-17 / Pitfall 4: a per-column-type-aware types_mapper, replacing the previous blanket
+        // `pandas.ArrowDtype` class reference. The closure captures NOTHING from the enclosing
+        // scope -- `PyCFunction::new_closure` requires `F: Fn(..) -> R + Send + 'static`, and a
+        // `Bound`/`Python` token is neither `Send` nor `'static`. The GIL token is obtained
+        // INSIDE the closure body from its own arguments (`args.py()`), and `pyarrow.types`/
+        // `pandas.ArrowDtype` are (re-)imported inside the body on each call.
+        let types_mapper = PyCFunction::new_closure(
+            py,
+            None,
+            None,
+            |args: &Bound<'_, PyTuple>, _kwargs: Option<&Bound<'_, PyDict>>| -> PyResult<Py<PyAny>> {
+                let py = args.py();
+                let arrow_type = args.get_item(0)?;
+                let pa_types = py.import("pyarrow")?.getattr("types")?;
+                let is_dictionary: bool = pa_types
+                    .call_method1("is_dictionary", (&arrow_type,))?
+                    .extract()?;
+                if is_dictionary {
+                    // Fall through to pyarrow's own default (non-ArrowDtype) reconstruction,
+                    // which produces a real pd.Categorical (D-17).
+                    Ok(py.None())
+                } else {
+                    let arrow_dtype = py.import("pandas")?.getattr("ArrowDtype")?;
+                    Ok(arrow_dtype.call1((&arrow_type,))?.unbind())
+                }
+            },
+        )?;
+
         let kwargs = PyDict::new(py);
-        kwargs.set_item("types_mapper", arrow_dtype)?;
+        kwargs.set_item("types_mapper", types_mapper)?;
         let df = pa_table.call_method("to_pandas", (), Some(&kwargs))?;
         Ok(df.unbind())
     }

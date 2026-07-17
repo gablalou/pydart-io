@@ -18,6 +18,11 @@ pub enum DtypeBackend {
     Arrow,
     /// Default numpy-backed: the column's data is a plain numpy `ndarray`.
     Numpy,
+    /// `pandas.CategoricalDtype`-backed: neither plain numpy nor `ArrowDtype` -- a pandas
+    /// `Categorical` stores its own split codes+categories extension array, never a flat
+    /// numpy buffer and never pyarrow's own `ArrowExtensionArray` (`isinstance(CategoricalDtype,
+    /// pandas.ArrowDtype)` is always `False`). See D-17/D-18 and RESEARCH.md Open Question 2.
+    Categorical,
 }
 
 /// The logical Arrow type category a column's values fall into, at this phase's scope
@@ -36,6 +41,12 @@ pub enum ArrowKind {
     /// case, enforced by `crates/flint-python/src/pandas.rs`'s
     /// `validate_object_column_contents`, not by this matrix.
     String,
+    /// pandas `Categorical` (ordered or unordered). Always paired with
+    /// `DtypeBackend::Categorical` -- see OQ2 (RESEARCH.md Open Question 2): modeled as its own
+    /// variant (not folded into the generic `RequiresCopy` fallback) so `plan_column`'s
+    /// pure-Rust unit tests exercise the categorical copy decision directly and the reason
+    /// string is categorical-specific (D-17/D-18).
+    Categorical,
 }
 
 /// The result of planning a single column's conversion: can it be borrowed as-is (zero-copy),
@@ -66,10 +77,13 @@ pub enum ColumnPlan {
 /// | Numpy   | Bool    | (n/a)      | `RequiresCopy`  |
 /// | Arrow   | String  | (n/a)      | `ZeroCopyBorrow`|
 /// | Numpy   | String  | (n/a)      | `RequiresCopy`  |
+/// | Categorical | Categorical | (n/a) | `RequiresCopy` |
 ///
 /// `is_contiguous` is ignored for `DtypeBackend::Arrow` columns (already Arrow's own memory,
-/// always zero-copy-borrowable at this phase's scope) and for `Numpy`+`Bool` (bit-packing means
-/// a numpy bool column always requires a copy, regardless of contiguity).
+/// always zero-copy-borrowable at this phase's scope), for `Numpy`+`Bool` (bit-packing means
+/// a numpy bool column always requires a copy, regardless of contiguity), and for
+/// `DtypeBackend::Categorical` (a categorical's split codes+categories representation has no
+/// single flat Arrow-compatible buffer to borrow, regardless of contiguity -- OQ2).
 pub fn plan_column(dtype_backend: DtypeBackend, arrow_kind: ArrowKind, is_contiguous: bool) -> ColumnPlan {
     match (dtype_backend, arrow_kind) {
         (DtypeBackend::Arrow, ArrowKind::Numeric) => ColumnPlan::ZeroCopyBorrow,
@@ -90,6 +104,24 @@ pub fn plan_column(dtype_backend: DtypeBackend, arrow_kind: ArrowKind, is_contig
             reason: "numpy object-dtype string column stores boxed Python str pointers with no \
                      contiguous Arrow-compatible UTF-8 buffer; materializing an Arrow string \
                      array requires a copy"
+                .to_string(),
+        },
+        (DtypeBackend::Categorical, ArrowKind::Categorical) => ColumnPlan::RequiresCopy {
+            reason: "pandas Categorical stores a split codes+categories representation with no \
+                     single flat Arrow-compatible buffer; dictionary-encoding it into an Arrow \
+                     DictionaryArray requires a copy (OQ2)"
+                .to_string(),
+        },
+        // Any other (backend, kind) pairing is unreachable in practice -- classify_dtype only
+        // ever pairs DtypeBackend::Categorical with ArrowKind::Categorical, and vice versa --
+        // but the match must stay exhaustive as new variants are added across the phase.
+        (DtypeBackend::Arrow, ArrowKind::Categorical)
+        | (DtypeBackend::Numpy, ArrowKind::Categorical)
+        | (DtypeBackend::Categorical, ArrowKind::Numeric)
+        | (DtypeBackend::Categorical, ArrowKind::Bool)
+        | (DtypeBackend::Categorical, ArrowKind::String) => ColumnPlan::RequiresCopy {
+            reason: "unexpected dtype backend/kind pairing; defaulting to a safe copy rather \
+                     than an unreachable panic"
                 .to_string(),
         },
     }
@@ -175,5 +207,22 @@ mod tests {
             plan_column(DtypeBackend::Numpy, ArrowKind::String, false),
             ColumnPlan::RequiresCopy { .. }
         ));
+    }
+
+    #[test]
+    fn plan_column_categorical_requires_copy() {
+        // is_contiguous is irrelevant for Categorical -- neither value changes the outcome.
+        for is_contiguous in [true, false] {
+            let plan = plan_column(DtypeBackend::Categorical, ArrowKind::Categorical, is_contiguous);
+            match plan {
+                ColumnPlan::RequiresCopy { reason } => {
+                    assert!(
+                        reason.contains("Categorical") || reason.contains("categorical"),
+                        "expected a categorical-specific reason, got: {reason:?}"
+                    );
+                }
+                other => panic!("expected RequiresCopy for Categorical, got {other:?}"),
+            }
+        }
     }
 }

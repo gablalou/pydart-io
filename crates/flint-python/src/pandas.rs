@@ -27,7 +27,7 @@ use std::sync::Arc;
 use arrow::array::{Array, ArrayRef, PrimitiveArray};
 use arrow::buffer::{Buffer, ScalarBuffer};
 use arrow::datatypes::{
-    Field, Float32Type, Float64Type, Int16Type, Int32Type, Int64Type, Int8Type, Schema,
+    DataType, Field, Float32Type, Float64Type, Int16Type, Int32Type, Int64Type, Int8Type, Schema,
     SchemaRef, UInt16Type, UInt32Type, UInt64Type, UInt8Type,
 };
 use arrow::record_batch::RecordBatch;
@@ -94,19 +94,27 @@ pub struct FromPandasOutcome {
 ///    <!-- EXTENSION POINT: Plan 04 (timestamp/duration[pyarrow]) inserts its `pa.types.is_*`
 ///    sub-kind checks HERE, before the Numeric/Bool/String fallthrough below rejects anything
 ///    else in this branch. -->
-/// 2. else `isinstance(dtype, pandas.api.extensions.ExtensionDtype)` -> reject. This branch
+/// 2. `isinstance(dtype, pandas.CategoricalDtype)` -> `DtypeBackend::Categorical` /
+///    `ArrowKind::Categorical` (D-17/D-18, OQ2). MUST be checked here, BEFORE the generic
+///    `ExtensionDtype` reject branch below -- `pandas.CategoricalDtype` IS an
+///    `ExtensionDtype` (`isinstance(pd.CategoricalDtype(), pd.api.extensions.ExtensionDtype)`
+///    is `True`), so appending this check after the catch-all would never be reached and
+///    every `Categorical` column would be incorrectly rejected as an unsupported masked
+///    extension dtype.
+/// 3. else `isinstance(dtype, pandas.api.extensions.ExtensionDtype)` -> reject. This branch
 ///    catches masked `Int64`/`boolean`/`Float64` (D-08) and, for now, also
-///    `CategoricalDtype`/`DatetimeTZDtype` (non-Arrow extension dtypes).
-///    <!-- EXTENSION POINT: Plan 03 (categorical) / Plan 04 (DatetimeTZDtype-if-applicable)
-///    MUST insert their specific isinstance checks ABOVE this generic reject branch, exactly
-///    as this comment says -- inserting below here would never be reached. -->
-/// 3. else it is a plain numpy dtype -> dispatch on `dtype.kind` as Phase 1 already does. Plan
+///    `DatetimeTZDtype` (non-Arrow extension dtypes).
+///    <!-- EXTENSION POINT: Plan 04 (DatetimeTZDtype-if-applicable) MUST insert its specific
+///    isinstance check ABOVE this generic reject branch, exactly as this comment says --
+///    inserting below here would never be reached. -->
+/// 4. else it is a plain numpy dtype -> dispatch on `dtype.kind` as Phase 1 already does. Plan
 ///    02 added `kind == 'O'` (object) -> `DtypeBackend::Numpy, ArrowKind::String`, whose content
 ///    is separately validated by `validate_object_column_contents` (D-11) before conversion.
 fn classify_dtype(
     py: Python<'_>,
     dtype: &Bound<'_, PyAny>,
     arrow_dtype_type: &Bound<'_, PyAny>,
+    categorical_dtype_type: &Bound<'_, PyAny>,
     extension_dtype_type: &Bound<'_, PyAny>,
     column_name: &str,
 ) -> PyResult<(DtypeBackend, ArrowKind, String)> {
@@ -159,12 +167,19 @@ fn classify_dtype(
         return Ok((DtypeBackend::Arrow, arrow_kind, dtype_str));
     }
 
-    // (2) Any other pandas ExtensionDtype (masked Int64/boolean/Float64, and for now also
-    // CategoricalDtype/DatetimeTZDtype which later plans will intercept ABOVE this branch)
-    // is rejected here, honestly, BEFORE the plain-numpy `.values.flags` access in
-    // `from_pandas` is ever reached (D-08 / Pitfall 1: masked extension arrays like
-    // `IntegerArray`/`BooleanArray` have no `.flags` attribute and previously crashed with a
-    // raw AttributeError instead of a clean FlintError).
+    // (2) pandas.CategoricalDtype -- MUST be checked here, BEFORE the generic ExtensionDtype
+    // reject branch below (D-17/D-18, OQ2). A CategoricalDtype IS an ExtensionDtype, so this
+    // check would never be reached if placed after the catch-all reject.
+    if dtype.is_instance(categorical_dtype_type)? {
+        return Ok((DtypeBackend::Categorical, ArrowKind::Categorical, dtype_str));
+    }
+
+    // (3) Any other pandas ExtensionDtype (masked Int64/boolean/Float64, and for now also
+    // DatetimeTZDtype which a later plan will intercept ABOVE this branch) is rejected here,
+    // honestly, BEFORE the plain-numpy `.values.flags` access in `from_pandas` is ever reached
+    // (D-08 / Pitfall 1: masked extension arrays like `IntegerArray`/`BooleanArray` have no
+    // `.flags` attribute and previously crashed with a raw AttributeError instead of a clean
+    // FlintError).
     if dtype.is_instance(extension_dtype_type)? {
         let dtype_type_name: String = dtype.get_type().name()?.extract()?;
         return Err(FlintError::UnsupportedColumn {
@@ -180,7 +195,7 @@ fn classify_dtype(
         .into());
     }
 
-    // (3) Plain numpy dtype -- dispatch on `.kind` exactly as Phase 1 does. Temporal ('M'/'m')
+    // (4) Plain numpy dtype -- dispatch on `.kind` exactly as Phase 1 does. Temporal ('M'/'m')
     // kinds remain rejected here for now; Plan 04 adds them. Object ('O') maps to
     // ArrowKind::String -- its content is validated separately by
     // `validate_object_column_contents` (D-11), called from `from_pandas` before any
@@ -210,6 +225,7 @@ fn classify_dtype(
 pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandasOutcome> {
     let pandas = py.import("pandas")?;
     let arrow_dtype_type = pandas.getattr("ArrowDtype")?;
+    let categorical_dtype_type = pandas.getattr("CategoricalDtype")?;
     let extension_dtype_type = pandas
         .getattr("api")?
         .getattr("extensions")?
@@ -230,6 +246,7 @@ pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandas
             py,
             &dtype,
             &arrow_dtype_type,
+            &categorical_dtype_type,
             &extension_dtype_type,
             &column_name_str,
         )?;
@@ -244,6 +261,11 @@ pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandas
                     .getattr("c_contiguous")?
                     .extract::<bool>()?
             }
+            // A Categorical's codes+categories split array never has a `.values.flags`
+            // access path meaningful to this check -- it always routes through the generic
+            // __arrow_c_stream__ fallback below, never the numpy-buffer borrow path, so
+            // contiguity is irrelevant here exactly as it is for the Arrow arm above.
+            DtypeBackend::Categorical => true,
         };
 
         let plan = plan_column(dtype_backend, arrow_kind, is_contiguous);
@@ -270,11 +292,20 @@ pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandas
             _ => import_column_via_pandas_stream(py, df, &column_name)?,
         };
 
-        fields.push(Field::new(
-            &column_name_str,
-            array.data_type().clone(),
-            array.null_count() > 0,
-        ));
+        // D-17 / Pitfall 3: a dictionary-typed column's `ordered` flag lives on arrow-schema's
+        // `Field` (`Field::dict_is_ordered`), NOT on `DataType::Dictionary` itself -- it must be
+        // sourced from the pandas source dtype's own `.ordered` attribute (only meaningful for a
+        // DtypeBackend::Categorical column) and propagated explicitly via `Field::new_dictionary`
+        // + `with_dict_is_ordered`, rather than the generic `Field::new(..,
+        // array.data_type().clone(), ..)` this used to unconditionally use for every column
+        // (which silently dropped `ordered` for every categorical, confirmed empirically in
+        // RESEARCH.md Pitfall 3 via a direct PyCapsule export with no `to_pandas` involved).
+        let is_ordered = if matches!(dtype_backend, DtypeBackend::Categorical) {
+            Some(dtype.getattr("ordered")?.extract::<bool>()?)
+        } else {
+            None
+        };
+        fields.push(build_field(&column_name_str, array.as_ref(), is_ordered));
         arrays.push(array);
     }
 
@@ -282,6 +313,29 @@ pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandas
     let batch = RecordBatch::try_new(schema, arrays).map_err(FlintError::from)?;
 
     Ok(FromPandasOutcome { batch, records })
+}
+
+/// Build a column's `Field`, propagating the dictionary `ordered` flag (D-17 / Pitfall 3) for
+/// `DataType::Dictionary`-typed columns.
+///
+/// `Field::dict_is_ordered` lives on `Field`, not `DataType` -- `array.data_type().clone()`
+/// alone can never carry it forward, so any `DataType::Dictionary` column MUST be constructed
+/// via `Field::new_dictionary(..).with_dict_is_ordered(..)` instead of the generic
+/// `Field::new(.., array.data_type().clone(), ..)` every other column uses unchanged.
+/// `is_ordered` is `None` for any non-categorical column (defaults to `false`, matching
+/// arrow-rs's own default) and `Some(dtype.ordered)` for a genuine pandas `Categorical` column
+/// (sourced from the pandas source dtype in `from_pandas`, not re-derived here).
+fn build_field(column_name: &str, array: &dyn Array, is_ordered: Option<bool>) -> Field {
+    match array.data_type() {
+        DataType::Dictionary(key_type, value_type) => Field::new_dictionary(
+            column_name,
+            (**key_type).clone(),
+            (**value_type).clone(),
+            array.null_count() > 0,
+        )
+        .with_dict_is_ordered(is_ordered.unwrap_or(false)),
+        other => Field::new(column_name, other.clone(), array.null_count() > 0),
+    }
 }
 
 /// Import a single column's data as an Arrow array by isolating it into a single-column
