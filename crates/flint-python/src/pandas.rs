@@ -89,17 +89,20 @@ pub struct FromPandasOutcome {
 /// `kind == 'i'`. The dispatch order below is load-bearing:
 ///
 /// 1. `isinstance(dtype, pandas.ArrowDtype)` -> `DtypeBackend::Arrow`, sub-classified via
-///    `pyarrow.types` predicates on `dtype.pyarrow_dtype` (not `dtype.kind`).
-///    <!-- EXTENSION POINT: Plans 02 (string[pyarrow]) / 04 (timestamp/duration[pyarrow])
-///    insert their `pa.types.is_*` sub-kind checks HERE, before the Numeric/Bool fallthrough
-///    below rejects anything else in this branch. -->
+///    `pyarrow.types` predicates on `dtype.pyarrow_dtype` (not `dtype.kind`). Plan 02 added
+///    `pa.types.is_string`/`is_large_string` -> `ArrowKind::String` here (D-10).
+///    <!-- EXTENSION POINT: Plan 04 (timestamp/duration[pyarrow]) inserts its `pa.types.is_*`
+///    sub-kind checks HERE, before the Numeric/Bool/String fallthrough below rejects anything
+///    else in this branch. -->
 /// 2. else `isinstance(dtype, pandas.api.extensions.ExtensionDtype)` -> reject. This branch
 ///    catches masked `Int64`/`boolean`/`Float64` (D-08) and, for now, also
 ///    `CategoricalDtype`/`DatetimeTZDtype` (non-Arrow extension dtypes).
 ///    <!-- EXTENSION POINT: Plan 03 (categorical) / Plan 04 (DatetimeTZDtype-if-applicable)
 ///    MUST insert their specific isinstance checks ABOVE this generic reject branch, exactly
 ///    as this comment says -- inserting below here would never be reached. -->
-/// 3. else it is a plain numpy dtype -> dispatch on `dtype.kind` as Phase 1 already does.
+/// 3. else it is a plain numpy dtype -> dispatch on `dtype.kind` as Phase 1 already does. Plan
+///    02 added `kind == 'O'` (object) -> `DtypeBackend::Numpy, ArrowKind::String`, whose content
+///    is separately validated by `validate_object_column_contents` (D-11) before conversion.
 fn classify_dtype(
     py: Python<'_>,
     dtype: &Bound<'_, PyAny>,
@@ -124,20 +127,30 @@ fn classify_dtype(
         let is_boolean: bool = pyarrow_types
             .call_method1("is_boolean", (&pyarrow_dtype,))?
             .extract()?;
+        let is_string: bool = pyarrow_types
+            .call_method1("is_string", (&pyarrow_dtype,))?
+            .extract()?;
+        // Accept large_string too (Assumption A2): pa.types.is_string(pa.large_string()) is
+        // False, so a plain is_string check alone would wrongly reject large_string[pyarrow].
+        let is_large_string: bool = pyarrow_types
+            .call_method1("is_large_string", (&pyarrow_dtype,))?
+            .extract()?;
 
         let arrow_kind = if is_integer || is_floating {
             ArrowKind::Numeric
         } else if is_boolean {
             ArrowKind::Bool
-            // EXTENSION POINT: Plans 02/04 add pa.types.is_string/is_large_string ->
-            // ArrowKind::String, is_timestamp -> ArrowKind::Timestamp{tz}, is_duration ->
-            // ArrowKind::Duration sub-kinds here, before the final reject fallthrough below.
+        } else if is_string || is_large_string {
+            ArrowKind::String
+            // EXTENSION POINT: Plan 04 adds pa.types.is_timestamp -> ArrowKind::Timestamp{tz},
+            // is_duration -> ArrowKind::Duration sub-kinds here, before the final reject
+            // fallthrough below.
         } else {
             return Err(FlintError::UnsupportedColumn {
                 column: column_name.to_string(),
                 dtype: dtype_str,
-                reason: "only numeric (int/uint/float) and boolean ArrowDtype columns are \
-                         supported in this phase"
+                reason: "only numeric (int/uint/float), boolean, and string ArrowDtype columns \
+                         are supported in this phase"
                     .to_string(),
             }
             .into());
@@ -167,18 +180,22 @@ fn classify_dtype(
         .into());
     }
 
-    // (3) Plain numpy dtype -- dispatch on `.kind` exactly as Phase 1 does. Object ('O') and
-    // temporal ('M'/'m') kinds remain rejected here for now; Plans 02/04 add them.
+    // (3) Plain numpy dtype -- dispatch on `.kind` exactly as Phase 1 does. Temporal ('M'/'m')
+    // kinds remain rejected here for now; Plan 04 adds them. Object ('O') maps to
+    // ArrowKind::String -- its content is validated separately by
+    // `validate_object_column_contents` (D-11), called from `from_pandas` before any
+    // conversion is attempted for this (Numpy, String) case.
     let kind: String = dtype.getattr("kind")?.extract()?;
     let arrow_kind = match kind.as_str() {
         "b" => ArrowKind::Bool,
         "i" | "u" | "f" => ArrowKind::Numeric,
+        "O" => ArrowKind::String,
         _ => {
             return Err(FlintError::UnsupportedColumn {
                 column: column_name.to_string(),
                 dtype: dtype_str,
-                reason: "only numeric (int/uint/float) and boolean columns are supported in this \
-                         phase"
+                reason: "only numeric (int/uint/float), boolean, and object/string columns are \
+                         supported in this phase"
                     .to_string(),
             }
             .into());
@@ -236,6 +253,16 @@ pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandas
             &plan,
         ));
 
+        // D-11 / RESEARCH.md Pitfall 2: a numpy object-dtype string column's content is NOT
+        // safe to trust to pyarrow's own type inference (it silently accepts dict-valued and
+        // int-valued columns, and raises order-dependent, non-Flint-owned errors on genuinely
+        // mixed columns). Run this Flint-owned validation pass BEFORE any conversion is
+        // attempted for exactly this (Numpy, String) case. The ArrowDtype string case does NOT
+        // get this validation -- its physical layout is already a typed Arrow string buffer.
+        if matches!((dtype_backend, arrow_kind), (DtypeBackend::Numpy, ArrowKind::String)) {
+            validate_object_column_contents(&series, &column_name_str)?;
+        }
+
         let array = match (&plan, dtype_backend, arrow_kind) {
             (ColumnPlan::ZeroCopyBorrow, DtypeBackend::Numpy, ArrowKind::Numeric) => {
                 borrow_numpy_numeric_column(&series, &column_name_str)?
@@ -273,6 +300,12 @@ pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandas
 /// honest copy -- a multi-chunk column was never one contiguous buffer to begin with, so this does
 /// not regress the single-chunk zero-copy path). Silently returning only the first batch would
 /// truncate every row after it (CR-01).
+///
+/// A genuinely empty (0-row) column's stream yields ZERO record batches (confirmed empirically
+/// for an empty `object`-dtype column, CONV-04's flagged empty-column edge case) even though the
+/// stream's schema is still available -- this is a valid, common case (an empty DataFrame column
+/// is not a malformed stream), so it is handled by constructing a genuinely empty array of the
+/// column's Arrow type directly from the schema, rather than treated as an error.
 fn import_column_via_pandas_stream(
     py: Python<'_>,
     df: &Bound<'_, PyAny>,
@@ -284,12 +317,11 @@ fn import_column_via_pandas_stream(
         .call_method0("__arrow_c_stream__")?
         .extract()?;
     let py_table = PyTable::from_arrow_pycapsule(&capsule)?;
-    let batches = py_table.batches();
+    let (batches, schema) = py_table.into_inner();
 
     if batches.is_empty() {
-        return Err(
-            FlintError::Other("column stream produced no record batches".to_string()).into(),
-        );
+        let data_type = schema.field(0).data_type();
+        return Ok(arrow::array::new_empty_array(data_type));
     }
 
     if batches.len() == 1 {
@@ -300,6 +332,51 @@ fn import_column_via_pandas_stream(
     let column_refs: Vec<&dyn Array> = columns.iter().map(|c| c.as_ref()).collect();
     let concatenated = arrow::compute::concat(&column_refs).map_err(FlintError::from)?;
     Ok(concatenated)
+}
+
+/// Flint-owned content validation for a legacy numpy object-dtype column (D-11 / RESEARCH.md
+/// Pitfall 2).
+///
+/// pandas'/pyarrow's own `__arrow_c_stream__` export infers the target Arrow type from an
+/// object column's contents rather than enforcing any caller-specified contract: a dict-valued
+/// column silently converts to a nested `struct`, an all-int column silently converts to
+/// `int64`, and a genuinely mixed-type column raises an order-dependent, non-Flint-owned
+/// exception (a different pyarrow exception type depending on which non-str element is
+/// encountered first). None of that is acceptable for this project's "honest conversion"
+/// contract, so this function iterates the column's values in Python BEFORE
+/// `import_column_via_pandas_stream` is ever called for a `(DtypeBackend::Numpy,
+/// ArrowKind::String)` column, and rejects the first non-`None`/non-`NaN` value that is not a
+/// `str` with a `FlintError::UnsupportedColumn` naming the column, dtype "object", and the
+/// offending value's `type(v).__name__` plus its row index.
+fn validate_object_column_contents(series: &Bound<'_, PyAny>, column_name: &str) -> PyResult<()> {
+    for (i, value) in series.try_iter()?.enumerate() {
+        let value = value?;
+        if value.is_none() {
+            continue;
+        }
+        // NaN (a float) is also treated as a missing value here, matching D-09's existing
+        // "NaN is not treated as an error" posture for numeric columns.
+        if let Ok(as_float) = value.extract::<f64>() {
+            if as_float.is_nan() {
+                continue;
+            }
+        }
+        if !value.is_instance_of::<pyo3::types::PyString>() {
+            let value_type_name: String = value.get_type().name()?.extract()?;
+            return Err(FlintError::UnsupportedColumn {
+                column: column_name.to_string(),
+                dtype: "object".to_string(),
+                reason: format!(
+                    "non-string value of type {value_type_name:?} found at row {i}; object-dtype \
+                     columns must contain only str values (and None/NaN) -- Flint does not rely \
+                     on pyarrow's own type inference for this, which would silently accept \
+                     dict-valued or int-valued object columns instead of rejecting them"
+                ),
+            }
+            .into());
+        }
+    }
+    Ok(())
 }
 
 /// Newtype around a borrowed numpy array's `Py<PyArray1<T>>` handle, used solely as the
