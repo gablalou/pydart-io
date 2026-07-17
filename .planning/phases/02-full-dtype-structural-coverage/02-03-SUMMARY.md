@@ -175,3 +175,9 @@ None - no external service configuration required.
 ---
 *Phase: 02-full-dtype-structural-coverage*
 *Completed: 2026-07-17*
+
+## Self-Check: PASSED
+
+All created/modified files confirmed present on disk (pandas_plan.rs, pandas.rs, table.rs,
+test_categorical.py, this SUMMARY.md). All 4 commits confirmed present in
+`git log --oneline --all` (134e9a5, 23f607e, b0637e3, be36b0c).
