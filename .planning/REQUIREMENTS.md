@@ -16,7 +16,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **CONV-05**: User can convert categorical dtype columns to/from Arrow dictionary-encoded columns
 - [x] **CONV-06**: User can convert datetime and timezone-aware timestamp columns to/from an Arrow Table
 - [x] **CONV-07**: User can convert timedelta columns to/from an Arrow Table
-- [ ] **CONV-08**: User can convert a Table with multiple chunks per column (ChunkedArray) to/from pandas
+- [x] **CONV-08**: User can convert a Table with multiple chunks per column (ChunkedArray) to/from pandas
 
 ### Diagnostics
 
@@ -80,7 +80,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CONV-05 | Phase 2 | Complete |
 | CONV-06 | Phase 2 | Complete |
 | CONV-07 | Phase 2 | Complete |
-| CONV-08 | Phase 2 | Pending |
+| CONV-08 | Phase 2 | Complete |
 | DIAG-01 | Phase 1 | Complete |
 | DIAG-02 | Phase 1 | Complete |
 | CAP-01 | Phase 1 | Complete |

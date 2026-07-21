@@ -398,7 +398,34 @@ pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandas
             (ColumnPlan::ZeroCopyBorrow, DtypeBackend::Numpy, ArrowKind::Numeric) => {
                 borrow_numpy_numeric_column(&series, &column_name_str)?
             }
-            _ => import_column_via_pandas_stream(py, df, &column_name)?,
+            _ => {
+                let (array, observed_batch_count) =
+                    import_column_via_pandas_stream(py, df, &column_name)?;
+                // D-13 / RESEARCH.md Pitfall 6 Strategy B: plan_column's a-priori ColumnPlan
+                // (already pushed into `records` above) has no chunk-count visibility -- it is
+                // computed from dtype backend + arrow kind + contiguity alone, before this
+                // stream-import call runs. When the stream actually yielded more than one
+                // RecordBatch, `import_column_via_pandas_stream` just performed a genuine
+                // `arrow::compute::concat` copy (see its doc comment) that the pre-computed
+                // record does not yet reflect. Correct that column's record here, in place,
+                // BEFORE `from_pandas` returns -- so `check_strict`/`build_copy_report`
+                // (diagnostics.rs, unchanged) see the corrected, honest record rather than the
+                // stale `ZeroCopyBorrow` prediction (closes the DIAG-01/DIAG-02 override from
+                // 01-VERIFICATION.md). A single-chunk column (`observed_batch_count <= 1`,
+                // including the empty-column 0-batch case) is left untouched.
+                if observed_batch_count > 1 {
+                    if let Some(record) = records.last_mut() {
+                        record.zero_copy = false;
+                        record.reason = Some(format!(
+                            "column arrived as {observed_batch_count} Arrow chunks (e.g. from a \
+                             pd.concat of Arrow-backed frames) and was concatenated into one \
+                             contiguous buffer via arrow::compute::concat, which is a copy, not \
+                             a zero-copy borrow"
+                        ));
+                    }
+                }
+                array
+            }
         };
 
         // D-17 / Pitfall 3: a dictionary-typed column's `ordered` flag lives on arrow-schema's
@@ -469,11 +496,17 @@ fn build_field(column_name: &str, array: &dyn Array, is_ordered: Option<bool>) -
 /// stream's schema is still available -- this is a valid, common case (an empty DataFrame column
 /// is not a malformed stream), so it is handled by constructing a genuinely empty array of the
 /// column's Arrow type directly from the schema, rather than treated as an error.
+///
+/// Returns `(array, observed_batch_count)` (D-13 / RESEARCH.md Pitfall 6 Strategy B): the caller
+/// (`from_pandas`) uses the observed batch count to correct that column's already-computed
+/// `ColumnConversionRecord` post-hoc when `observed_batch_count > 1` -- this function itself does
+/// not know about `ColumnConversionRecord`/diagnostics at all, it only surfaces the count it
+/// already has on hand from the branch it took.
 fn import_column_via_pandas_stream(
     py: Python<'_>,
     df: &Bound<'_, PyAny>,
     column_name: &Bound<'_, PyAny>,
-) -> PyResult<ArrayRef> {
+) -> PyResult<(ArrayRef, usize)> {
     let single_column_selector = PyList::new(py, [column_name])?;
     let single_column_df = df.get_item(single_column_selector)?;
     let capsule: Bound<'_, PyCapsule> = single_column_df
@@ -484,17 +517,17 @@ fn import_column_via_pandas_stream(
 
     if batches.is_empty() {
         let data_type = schema.field(0).data_type();
-        return Ok(arrow::array::new_empty_array(data_type));
+        return Ok((arrow::array::new_empty_array(data_type), 0));
     }
 
     if batches.len() == 1 {
-        return Ok(batches[0].column(0).clone());
+        return Ok((batches[0].column(0).clone(), 1));
     }
 
     let columns: Vec<ArrayRef> = batches.iter().map(|b| b.column(0).clone()).collect();
     let column_refs: Vec<&dyn Array> = columns.iter().map(|c| c.as_ref()).collect();
     let concatenated = arrow::compute::concat(&column_refs).map_err(FlintError::from)?;
-    Ok(concatenated)
+    Ok((concatenated, batches.len()))
 }
 
 /// Flint-owned content validation for a legacy numpy object-dtype column (D-11 / RESEARCH.md
