@@ -25,9 +25,12 @@ pub enum DtypeBackend {
     Categorical,
 }
 
-/// The logical Arrow type category a column's values fall into, at this phase's scope
-/// (numeric or boolean only -- nulls/strings/categoricals/datetimes are Phase 2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// The logical Arrow type category a column's values fall into.
+///
+/// Carries `Timestamp { tz }`'s owned `String` for the tz name, so `ArrowKind` no longer
+/// derives `Copy` (only `Clone`) -- see call sites in `crates/flint-python/src/pandas.rs` for
+/// the resulting clone-vs-move adjustments.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ArrowKind {
     /// Any integer or floating-point numeric type (int8..int64, uint8..uint64, float32/float64).
     Numeric,
@@ -47,6 +50,16 @@ pub enum ArrowKind {
     /// pure-Rust unit tests exercise the categorical copy decision directly and the reason
     /// string is categorical-specific (D-17/D-18).
     Categorical,
+    /// Nanosecond-resolution timestamp, optionally timezone-aware (D-15/D-16, CONV-06). `tz` is
+    /// `None` for a naive `datetime64[ns]` column and `Some(tz_string)` (round-tripped exactly
+    /// as-is, no UTC normalization) for a tz-aware `datetime64[ns, tz]`/`timestamp[ns, tz]`
+    /// column. `classify_dtype` (crates/flint-python/src/pandas.rs) only ever constructs this
+    /// variant after confirming ns resolution -- any other resolution is rejected before this
+    /// variant is built, so this matrix never has to re-check resolution.
+    Timestamp { tz: Option<String> },
+    /// Nanosecond-resolution timedelta (D-15, CONV-07). Same ns-only-after-classification
+    /// invariant as `Timestamp` above.
+    Duration,
 }
 
 /// The result of planning a single column's conversion: can it be borrowed as-is (zero-copy),
@@ -78,12 +91,22 @@ pub enum ColumnPlan {
 /// | Arrow   | String  | (n/a)      | `ZeroCopyBorrow`|
 /// | Numpy   | String  | (n/a)      | `RequiresCopy`  |
 /// | Categorical | Categorical | (n/a) | `RequiresCopy` |
+/// | Arrow   | Timestamp{tz} | (n/a) | `ZeroCopyBorrow`|
+/// | Arrow   | Duration | (n/a)    | `ZeroCopyBorrow`|
+/// | Numpy   | Timestamp{tz} | (n/a) | `RequiresCopy`|
+/// | Numpy   | Duration | (n/a)    | `RequiresCopy`  |
 ///
 /// `is_contiguous` is ignored for `DtypeBackend::Arrow` columns (already Arrow's own memory,
 /// always zero-copy-borrowable at this phase's scope), for `Numpy`+`Bool` (bit-packing means
-/// a numpy bool column always requires a copy, regardless of contiguity), and for
+/// a numpy bool column always requires a copy, regardless of contiguity), for
 /// `DtypeBackend::Categorical` (a categorical's split codes+categories representation has no
-/// single flat Arrow-compatible buffer to borrow, regardless of contiguity -- OQ2).
+/// single flat Arrow-compatible buffer to borrow, regardless of contiguity -- OQ2), and for
+/// `Numpy`+`Timestamp`/`Duration` (D-15: numpy `datetime64[ns]`/`timedelta64[ns]` storage is
+/// never an Arrow-compatible buffer, so it always requires a copy via the pandas stream
+/// fallback regardless of contiguity -- `from_pandas` still computes `is_contiguous` via
+/// `.values.flags.c_contiguous` for these columns since plain numpy datetime64/timedelta64
+/// arrays DO expose `.flags` unlike masked extension arrays, but the value is simply unused
+/// here).
 pub fn plan_column(dtype_backend: DtypeBackend, arrow_kind: ArrowKind, is_contiguous: bool) -> ColumnPlan {
     match (dtype_backend, arrow_kind) {
         (DtypeBackend::Arrow, ArrowKind::Numeric) => ColumnPlan::ZeroCopyBorrow,
@@ -112,6 +135,20 @@ pub fn plan_column(dtype_backend: DtypeBackend, arrow_kind: ArrowKind, is_contig
                      DictionaryArray requires a copy (OQ2)"
                 .to_string(),
         },
+        (DtypeBackend::Arrow, ArrowKind::Timestamp { .. }) => ColumnPlan::ZeroCopyBorrow,
+        (DtypeBackend::Arrow, ArrowKind::Duration) => ColumnPlan::ZeroCopyBorrow,
+        (DtypeBackend::Numpy, ArrowKind::Timestamp { .. }) => ColumnPlan::RequiresCopy {
+            reason: "numpy datetime64[ns] storage (plain or tz-aware DatetimeTZDtype) is not an \
+                     Arrow-compatible buffer; materializing an Arrow Timestamp array requires a \
+                     copy via the pandas stream fallback (D-15)"
+                .to_string(),
+        },
+        (DtypeBackend::Numpy, ArrowKind::Duration) => ColumnPlan::RequiresCopy {
+            reason: "numpy timedelta64[ns] storage is not an Arrow-compatible buffer; \
+                     materializing an Arrow Duration array requires a copy via the pandas \
+                     stream fallback (D-15)"
+                .to_string(),
+        },
         // Any other (backend, kind) pairing is unreachable in practice -- classify_dtype only
         // ever pairs DtypeBackend::Categorical with ArrowKind::Categorical, and vice versa --
         // but the match must stay exhaustive as new variants are added across the phase.
@@ -119,7 +156,9 @@ pub fn plan_column(dtype_backend: DtypeBackend, arrow_kind: ArrowKind, is_contig
         | (DtypeBackend::Numpy, ArrowKind::Categorical)
         | (DtypeBackend::Categorical, ArrowKind::Numeric)
         | (DtypeBackend::Categorical, ArrowKind::Bool)
-        | (DtypeBackend::Categorical, ArrowKind::String) => ColumnPlan::RequiresCopy {
+        | (DtypeBackend::Categorical, ArrowKind::String)
+        | (DtypeBackend::Categorical, ArrowKind::Timestamp { .. })
+        | (DtypeBackend::Categorical, ArrowKind::Duration) => ColumnPlan::RequiresCopy {
             reason: "unexpected dtype backend/kind pairing; defaulting to a safe copy rather \
                      than an unreachable panic"
                 .to_string(),
@@ -207,6 +246,60 @@ mod tests {
             plan_column(DtypeBackend::Numpy, ArrowKind::String, false),
             ColumnPlan::RequiresCopy { .. }
         ));
+    }
+
+    #[test]
+    fn plan_column_arrow_timestamp_is_zero_copy_borrow() {
+        // is_contiguous and tz are both irrelevant for Arrow-backed columns.
+        assert_eq!(
+            plan_column(DtypeBackend::Arrow, ArrowKind::Timestamp { tz: None }, true),
+            ColumnPlan::ZeroCopyBorrow
+        );
+        assert_eq!(
+            plan_column(
+                DtypeBackend::Arrow,
+                ArrowKind::Timestamp {
+                    tz: Some("America/New_York".to_string())
+                },
+                false
+            ),
+            ColumnPlan::ZeroCopyBorrow
+        );
+    }
+
+    #[test]
+    fn plan_column_arrow_duration_is_zero_copy_borrow() {
+        assert_eq!(
+            plan_column(DtypeBackend::Arrow, ArrowKind::Duration, true),
+            ColumnPlan::ZeroCopyBorrow
+        );
+        assert_eq!(
+            plan_column(DtypeBackend::Arrow, ArrowKind::Duration, false),
+            ColumnPlan::ZeroCopyBorrow
+        );
+    }
+
+    #[test]
+    fn plan_column_numpy_timestamp_requires_copy() {
+        // is_contiguous is irrelevant -- numpy datetime64 storage always requires a copy.
+        for is_contiguous in [true, false] {
+            for tz in [None, Some("America/New_York".to_string())] {
+                assert!(matches!(
+                    plan_column(DtypeBackend::Numpy, ArrowKind::Timestamp { tz }, is_contiguous),
+                    ColumnPlan::RequiresCopy { .. }
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn plan_column_numpy_duration_requires_copy() {
+        for is_contiguous in [true, false] {
+            assert!(matches!(
+                plan_column(DtypeBackend::Numpy, ArrowKind::Duration, is_contiguous),
+                ColumnPlan::RequiresCopy { .. }
+            ));
+        }
     }
 
     #[test]

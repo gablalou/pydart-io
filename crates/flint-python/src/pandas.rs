@@ -90,10 +90,9 @@ pub struct FromPandasOutcome {
 ///
 /// 1. `isinstance(dtype, pandas.ArrowDtype)` -> `DtypeBackend::Arrow`, sub-classified via
 ///    `pyarrow.types` predicates on `dtype.pyarrow_dtype` (not `dtype.kind`). Plan 02 added
-///    `pa.types.is_string`/`is_large_string` -> `ArrowKind::String` here (D-10).
-///    <!-- EXTENSION POINT: Plan 04 (timestamp/duration[pyarrow]) inserts its `pa.types.is_*`
-///    sub-kind checks HERE, before the Numeric/Bool/String fallthrough below rejects anything
-///    else in this branch. -->
+///    `pa.types.is_string`/`is_large_string` -> `ArrowKind::String` here (D-10). Plan 04 adds
+///    `pa.types.is_timestamp`/`is_duration` -> `ArrowKind::Timestamp{tz}`/`Duration` here,
+///    each gated to ns resolution (D-15) -- non-ns is rejected before this branch returns.
 /// 2. `isinstance(dtype, pandas.CategoricalDtype)` -> `DtypeBackend::Categorical` /
 ///    `ArrowKind::Categorical` (D-17/D-18, OQ2). MUST be checked here, BEFORE the generic
 ///    `ExtensionDtype` reject branch below -- `pandas.CategoricalDtype` IS an
@@ -101,20 +100,30 @@ pub struct FromPandasOutcome {
 ///    is `True`), so appending this check after the catch-all would never be reached and
 ///    every `Categorical` column would be incorrectly rejected as an unsupported masked
 ///    extension dtype.
-/// 3. else `isinstance(dtype, pandas.api.extensions.ExtensionDtype)` -> reject. This branch
-///    catches masked `Int64`/`boolean`/`Float64` (D-08) and, for now, also
-///    `DatetimeTZDtype` (non-Arrow extension dtypes).
-///    <!-- EXTENSION POINT: Plan 04 (DatetimeTZDtype-if-applicable) MUST insert its specific
-///    isinstance check ABOVE this generic reject branch, exactly as this comment says --
-///    inserting below here would never be reached. -->
-/// 4. else it is a plain numpy dtype -> dispatch on `dtype.kind` as Phase 1 already does. Plan
+/// 3. `isinstance(dtype, pandas.DatetimeTZDtype)` -> `DtypeBackend::Numpy` /
+///    `ArrowKind::Timestamp { tz: Some(..) }` (D-15/D-16, CONV-06). MUST be checked here,
+///    BEFORE the generic `ExtensionDtype` reject branch below -- `pandas.DatetimeTZDtype` IS
+///    an `ExtensionDtype` (like `CategoricalDtype` above), so placing this check after the
+///    catch-all would make every tz-aware datetime64 column incorrectly rejected. Routed to
+///    `DtypeBackend::Numpy` (not `Arrow`): a `DatetimeTZDtype` column is not pyarrow-backed
+///    memory, so `plan_column`'s `(Numpy, Timestamp)` arm honestly reports `RequiresCopy`
+///    rather than falsely claiming a zero-copy borrow. Gated to ns resolution (D-15); the tz
+///    string is round-tripped exactly as-is via `str(dtype.tz)`, no UTC normalization (D-16).
+/// 4. else `isinstance(dtype, pandas.api.extensions.ExtensionDtype)` -> reject. This branch
+///    catches masked `Int64`/`boolean`/`Float64` (D-08) and any other non-Arrow extension
+///    dtype not handled by an earlier, more specific branch above.
+/// 5. else it is a plain numpy dtype -> dispatch on `dtype.kind` as Phase 1 already does. Plan
 ///    02 added `kind == 'O'` (object) -> `DtypeBackend::Numpy, ArrowKind::String`, whose content
 ///    is separately validated by `validate_object_column_contents` (D-11) before conversion.
+///    Plan 04 adds `kind == 'M'`/`'m'` (plain numpy `datetime64`/`timedelta64`) ->
+///    `DtypeBackend::Numpy`, `ArrowKind::Timestamp { tz: None }`/`Duration`, using
+///    `np.datetime_data(dtype)` (NOT string-parsing `str(dtype)`) for the ns-resolution gate.
 fn classify_dtype(
     py: Python<'_>,
     dtype: &Bound<'_, PyAny>,
     arrow_dtype_type: &Bound<'_, PyAny>,
     categorical_dtype_type: &Bound<'_, PyAny>,
+    datetime_tz_dtype_type: &Bound<'_, PyAny>,
     extension_dtype_type: &Bound<'_, PyAny>,
     column_name: &str,
 ) -> PyResult<(DtypeBackend, ArrowKind, String)> {
@@ -143,6 +152,12 @@ fn classify_dtype(
         let is_large_string: bool = pyarrow_types
             .call_method1("is_large_string", (&pyarrow_dtype,))?
             .extract()?;
+        let is_timestamp: bool = pyarrow_types
+            .call_method1("is_timestamp", (&pyarrow_dtype,))?
+            .extract()?;
+        let is_duration: bool = pyarrow_types
+            .call_method1("is_duration", (&pyarrow_dtype,))?
+            .extract()?;
 
         let arrow_kind = if is_integer || is_floating {
             ArrowKind::Numeric
@@ -150,15 +165,37 @@ fn classify_dtype(
             ArrowKind::Bool
         } else if is_string || is_large_string {
             ArrowKind::String
-            // EXTENSION POINT: Plan 04 adds pa.types.is_timestamp -> ArrowKind::Timestamp{tz},
-            // is_duration -> ArrowKind::Duration sub-kinds here, before the final reject
-            // fallthrough below.
+        } else if is_timestamp {
+            // D-15: ns-only resolution gate, same reasoning as the DatetimeTZDtype and
+            // plain-numpy branches below.
+            let unit: String = pyarrow_dtype.getattr("unit")?.extract()?;
+            if unit != "ns" {
+                return Err(FlintError::UnsupportedColumn {
+                    column: column_name.to_string(),
+                    dtype: dtype_str,
+                    reason: non_ns_temporal_rejection_reason(&unit),
+                }
+                .into());
+            }
+            let tz: Option<String> = pyarrow_dtype.getattr("tz")?.extract()?;
+            ArrowKind::Timestamp { tz }
+        } else if is_duration {
+            let unit: String = pyarrow_dtype.getattr("unit")?.extract()?;
+            if unit != "ns" {
+                return Err(FlintError::UnsupportedColumn {
+                    column: column_name.to_string(),
+                    dtype: dtype_str,
+                    reason: non_ns_temporal_rejection_reason(&unit),
+                }
+                .into());
+            }
+            ArrowKind::Duration
         } else {
             return Err(FlintError::UnsupportedColumn {
                 column: column_name.to_string(),
                 dtype: dtype_str,
-                reason: "only numeric (int/uint/float), boolean, and string ArrowDtype columns \
-                         are supported in this phase"
+                reason: "only numeric (int/uint/float), boolean, string, timestamp, and \
+                         duration ArrowDtype columns are supported in this phase"
                     .to_string(),
             }
             .into());
@@ -174,8 +211,36 @@ fn classify_dtype(
         return Ok((DtypeBackend::Categorical, ArrowKind::Categorical, dtype_str));
     }
 
-    // (3) Any other pandas ExtensionDtype (masked Int64/boolean/Float64, and for now also
-    // DatetimeTZDtype which a later plan will intercept ABOVE this branch) is rejected here,
+    // (3) pandas.DatetimeTZDtype -- MUST be checked here, BEFORE the generic ExtensionDtype
+    // reject branch below (D-15/D-16, CONV-06), for the same reason as CategoricalDtype above:
+    // DatetimeTZDtype IS an ExtensionDtype, so this check would never be reached if placed
+    // after the catch-all reject. Routed to DtypeBackend::Numpy (not Arrow) -- a tz-aware
+    // datetime64 column is not pyarrow-backed memory, so plan_column's (Numpy, Timestamp) arm
+    // honestly reports RequiresCopy. `dtype.unit` is read directly (pandas' ExtensionDtype
+    // exposes it, per RESEARCH.md's verified `datetime_unit` helper) rather than
+    // string-parsing `str(dtype)`. The tz string is round-tripped via `str(dtype.tz)` exactly
+    // as-is (D-16: no UTC normalization -- confirmed empirically that `str(dtype.tz)` yields
+    // the original zone name, e.g. "America/New_York", not a UTC-normalized form).
+    if dtype.is_instance(datetime_tz_dtype_type)? {
+        let unit: String = dtype.getattr("unit")?.extract()?;
+        if unit != "ns" {
+            return Err(FlintError::UnsupportedColumn {
+                column: column_name.to_string(),
+                dtype: dtype_str,
+                reason: non_ns_temporal_rejection_reason(&unit),
+            }
+            .into());
+        }
+        let tz_obj = dtype.getattr("tz")?;
+        let tz_str: String = tz_obj.str()?.extract()?;
+        return Ok((
+            DtypeBackend::Numpy,
+            ArrowKind::Timestamp { tz: Some(tz_str) },
+            dtype_str,
+        ));
+    }
+
+    // (4) Any other pandas ExtensionDtype (masked Int64/boolean/Float64) is rejected here,
     // honestly, BEFORE the plain-numpy `.values.flags` access in `from_pandas` is ever reached
     // (D-08 / Pitfall 1: masked extension arrays like `IntegerArray`/`BooleanArray` have no
     // `.flags` attribute and previously crashed with a raw AttributeError instead of a clean
@@ -195,22 +260,41 @@ fn classify_dtype(
         .into());
     }
 
-    // (4) Plain numpy dtype -- dispatch on `.kind` exactly as Phase 1 does. Temporal ('M'/'m')
-    // kinds remain rejected here for now; Plan 04 adds them. Object ('O') maps to
+    // (5) Plain numpy dtype -- dispatch on `.kind` exactly as Phase 1 does. Object ('O') maps to
     // ArrowKind::String -- its content is validated separately by
     // `validate_object_column_contents` (D-11), called from `from_pandas` before any
-    // conversion is attempted for this (Numpy, String) case.
+    // conversion is attempted for this (Numpy, String) case. 'M' (datetime64) / 'm'
+    // (timedelta64) use `np.datetime_data(dtype)` (NOT string-parsing `str(dtype)`, per
+    // RESEARCH.md's verified `datetime_unit` helper) for the ns-resolution gate (D-15).
     let kind: String = dtype.getattr("kind")?.extract()?;
     let arrow_kind = match kind.as_str() {
         "b" => ArrowKind::Bool,
         "i" | "u" | "f" => ArrowKind::Numeric,
         "O" => ArrowKind::String,
+        "M" | "m" => {
+            let numpy = py.import("numpy")?;
+            let datetime_data = numpy.call_method1("datetime_data", (dtype,))?;
+            let unit: String = datetime_data.get_item(0)?.extract()?;
+            if unit != "ns" {
+                return Err(FlintError::UnsupportedColumn {
+                    column: column_name.to_string(),
+                    dtype: dtype_str,
+                    reason: non_ns_temporal_rejection_reason(&unit),
+                }
+                .into());
+            }
+            if kind == "M" {
+                ArrowKind::Timestamp { tz: None }
+            } else {
+                ArrowKind::Duration
+            }
+        }
         _ => {
             return Err(FlintError::UnsupportedColumn {
                 column: column_name.to_string(),
                 dtype: dtype_str,
-                reason: "only numeric (int/uint/float), boolean, and object/string columns are \
-                         supported in this phase"
+                reason: "only numeric (int/uint/float), boolean, object/string, datetime64, \
+                         and timedelta64 columns are supported in this phase"
                     .to_string(),
             }
             .into());
@@ -220,12 +304,33 @@ fn classify_dtype(
     Ok((DtypeBackend::Numpy, arrow_kind, dtype_str))
 }
 
+/// Build the actionable rejection reason for a non-nanosecond-resolution datetime/timedelta
+/// column (D-15 / RESEARCH.md Pitfall 5).
+///
+/// pandas 3.0 changed `pd.to_datetime()`/`pd.to_timedelta()`'s default parsing resolution from
+/// nanoseconds to microseconds -- the single most common way a pandas-3.0 user builds a
+/// datetime/timedelta column (with no explicit `dtype=`) now yields `us` resolution, which
+/// Flint rejects per D-15's ns-only scope. The message explicitly names this pandas-3.0
+/// behavior change and suggests the `.astype('datetime64[ns]')` fix, rather than reading as a
+/// confusing, unexplained failure.
+fn non_ns_temporal_rejection_reason(actual_unit: &str) -> String {
+    format!(
+        "resolution {actual_unit:?} is not supported; only nanosecond ('ns') resolution \
+         datetime64/timedelta64 columns are supported in this phase. Note: pandas 3.0 changed \
+         the default parsing resolution of pd.to_datetime()/pd.to_timedelta() from nanoseconds \
+         to microseconds, so a column built without an explicit dtype may now be {actual_unit:?} \
+         resolution -- cast it explicitly, e.g. .astype('datetime64[ns]') (or the timedelta64 \
+         equivalent), before calling flint.Table.from_pandas"
+    )
+}
+
 /// Convert an entire pandas DataFrame into a `RecordBatch`, driving every column's
 /// copy-vs-borrow decision through `plan_column` (the single source of truth).
 pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandasOutcome> {
     let pandas = py.import("pandas")?;
     let arrow_dtype_type = pandas.getattr("ArrowDtype")?;
     let categorical_dtype_type = pandas.getattr("CategoricalDtype")?;
+    let datetime_tz_dtype_type = pandas.getattr("DatetimeTZDtype")?;
     let extension_dtype_type = pandas
         .getattr("api")?
         .getattr("extensions")?
@@ -247,6 +352,7 @@ pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandas
             &dtype,
             &arrow_dtype_type,
             &categorical_dtype_type,
+            &datetime_tz_dtype_type,
             &extension_dtype_type,
             &column_name_str,
         )?;
@@ -268,7 +374,10 @@ pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandas
             DtypeBackend::Categorical => true,
         };
 
-        let plan = plan_column(dtype_backend, arrow_kind, is_contiguous);
+        // `ArrowKind` no longer derives `Copy` (Task 1: `Timestamp` carries an owned `String`),
+        // so `arrow_kind` is cloned into `plan_column` here and borrowed (`&arrow_kind`) at its
+        // two remaining use sites below, rather than moved by value at each site.
+        let plan = plan_column(dtype_backend, arrow_kind.clone(), is_contiguous);
         records.push(ColumnConversionRecord::from_plan(
             column_name_str.clone(),
             dtype_str,
@@ -281,11 +390,11 @@ pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandas
         // mixed columns). Run this Flint-owned validation pass BEFORE any conversion is
         // attempted for exactly this (Numpy, String) case. The ArrowDtype string case does NOT
         // get this validation -- its physical layout is already a typed Arrow string buffer.
-        if matches!((dtype_backend, arrow_kind), (DtypeBackend::Numpy, ArrowKind::String)) {
+        if matches!((dtype_backend, &arrow_kind), (DtypeBackend::Numpy, ArrowKind::String)) {
             validate_object_column_contents(&series, &column_name_str)?;
         }
 
-        let array = match (&plan, dtype_backend, arrow_kind) {
+        let array = match (&plan, dtype_backend, &arrow_kind) {
             (ColumnPlan::ZeroCopyBorrow, DtypeBackend::Numpy, ArrowKind::Numeric) => {
                 borrow_numpy_numeric_column(&series, &column_name_str)?
             }
