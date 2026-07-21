@@ -45,7 +45,10 @@
     "post_planning_gaps": true,
     "security_enforcement": true,
     "security_asvs_level": 1,
-    "security_block_on": "high"
+    "security_block_on": "high",
+    "_auto_chain_active": false,
+    "build_command": "cargo build --workspace",
+    "test_command": "cargo test --workspace && uv run maturin develop && uv run pytest tests/python -q"
   },
   "ship": {
     "pr_body_sections": [
