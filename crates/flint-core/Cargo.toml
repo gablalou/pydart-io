@@ -38,3 +38,10 @@ path = "../../tests/rust/concat_generic_arrays.rs"
 [[test]]
 name = "parquet_dictionary_tz_roundtrip"
 path = "../../tests/rust/parquet_dictionary_tz_roundtrip.rs"
+
+# Plan 03 Task 1: PARQ-04 skip-engagement integration probe -- proves surviving_row_groups (Task 2)
+# genuinely engages the row-group-skip decision against a real 3-row-group Parquet file's own
+# written statistics, not merely that final rows are correct -- mirrors the entries above.
+[[test]]
+name = "parquet_row_group_pruning"
+path = "../../tests/rust/parquet_row_group_pruning.rs"
