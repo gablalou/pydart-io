@@ -6,6 +6,7 @@
 //! proof (D-06b).
 
 pub mod pandas_plan;
+pub mod parquet_io;
 pub mod table;
 
 pub use pandas_plan::{plan_column, ArrowKind, ColumnPlan, DtypeBackend};

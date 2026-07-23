@@ -32,7 +32,10 @@
 //! own doc comment below for why, and why that documented copy is intentional and not surfaced
 //! in `copy_report()`.
 
+use std::path::PathBuf;
+
 use arrow::array::Array;
+use arrow::compute::concat_batches;
 use pyo3::prelude::*;
 use pyo3::types::{PyCapsule, PyCFunction, PyDict, PyTuple, PyType};
 use pyo3_arrow::PyTable;
@@ -188,6 +191,63 @@ impl Table {
         kwargs.set_item("types_mapper", types_mapper)?;
         let df = pa_table.call_method("to_pandas", (), Some(&kwargs))?;
         Ok(df.unbind())
+    }
+
+    /// Read a Parquet file at `path` into a `Table` (PARQ-01, D-19/D-20).
+    ///
+    /// Accepts a `str` or `pathlib.Path` (D-20) -- extracting directly as `PathBuf` uses PyO3's
+    /// own `os.PathLike`-aware conversion, so any other argument type fails extraction with a
+    /// clear `TypeError` rather than being silently coerced. Delegates the actual file IO
+    /// entirely to the pyo3-free `flint_core::parquet_io::read_parquet` -- no `parquet`-crate
+    /// call happens in this crate. `column_reports: Vec::new()` (mirroring `from_pytable`'s
+    /// empty-report convention) since a Parquet read did not go through `from_pandas`'s
+    /// per-column plan. No `columns`/`filters` params in this plan (added in Plan 03).
+    #[classmethod]
+    #[pyo3(signature = (path))]
+    fn from_parquet(_cls: &Bound<'_, PyType>, py: Python<'_>, path: PathBuf) -> PyResult<Self> {
+        let batch = flint_core::parquet_io::read_parquet(&path).map_err(|err| {
+            FlintError::Other(format!("failed to read Parquet file {path:?}: {err}"))
+        })?;
+        let schema = batch.schema();
+        let py_table = PyTable::try_new(vec![batch], schema)?;
+
+        Ok(Self {
+            inner: Py::new(py, py_table)?,
+            column_reports: Vec::new(),
+        })
+    }
+
+    /// Write this `Table` to a Parquet file at `path` (PARQ-01, basic PARQ-02/D-28).
+    ///
+    /// Accepts a `str` or `pathlib.Path` (D-20). Overwrites an existing file silently (D-22 --
+    /// `std::fs::File::create` truncate semantics, enforced inside
+    /// `flint_core::parquet_io::write_parquet`). Gathers this Table's batches into a single
+    /// `RecordBatch` (concatenating via `arrow::compute::concat_batches` when there is more than
+    /// one) to match `write_parquet`'s single-batch signature -- mirrors `to_pandas`'s
+    /// batch-gathering step (lines above), but a 0-row batch (the empty-table case) still writes
+    /// a valid schema-only Parquet file rather than being rejected the way `to_pandas` rejects a
+    /// genuinely batch-less Table (the empty-table decision, must_haves).
+    #[pyo3(signature = (path))]
+    fn to_parquet(&self, py: Python<'_>, path: PathBuf) -> PyResult<()> {
+        let batches = self.inner.bind(py).get().batches().to_vec();
+        let batch = match batches.len() {
+            0 => {
+                return Err(FlintError::Other(
+                    "cannot write an empty Table with no record batches to Parquet".to_string(),
+                )
+                .into())
+            }
+            1 => batches.into_iter().next().expect("checked len == 1 above"),
+            _ => {
+                let schema = batches[0].schema();
+                concat_batches(&schema, &batches).map_err(FlintError::Arrow)?
+            }
+        };
+
+        flint_core::parquet_io::write_parquet(&batch, &path).map_err(|err| {
+            FlintError::Other(format!("failed to write Parquet file {path:?}: {err}"))
+        })?;
+        Ok(())
     }
 
     /// Export this table's schema via the Arrow PyCapsule Interface.
