@@ -10,6 +10,7 @@ crate-type = ["rlib"]
 
 [dependencies]
 arrow = "59.1.0"
+parquet = "59.1.0"
 
 [dev-dependencies]
 allocation-counter = "0.8"
@@ -28,3 +29,12 @@ path = "../../tests/rust/zero_copy_alloc.rs"
 [[test]]
 name = "concat_generic_arrays"
 path = "../../tests/rust/concat_generic_arrays.rs"
+
+# Assumption A6 probe (RESEARCH.md Assumptions Log A6, mandatory Wave-0 gate): proves arrow-rs's
+# ArrowWriter/ParquetRecordBatchReaderBuilder default (embedded ARROW:schema metadata) round-trip
+# preserves DataType::Dictionary (with dict_is_ordered) and an exact non-UTC tz string, before
+# Plans 02-04 build on that assumption -- mirrors the zero_copy_alloc/concat_generic_arrays
+# entries above.
+[[test]]
+name = "parquet_dictionary_tz_roundtrip"
+path = "../../tests/rust/parquet_dictionary_tz_roundtrip.rs"
