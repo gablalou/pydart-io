@@ -101,7 +101,23 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Written Parquet files carry row-group statistics that enable predicate pushdown, and the user can apply column projection plus predicate pushdown when reading
   4. A Parquet round-trip preserves logical types correctly, including tz-aware timestamps and categorical/dictionary encoding
 
-**Plans**: TBD
+**Plans**: 4 plans
+
+**Wave 1**
+
+- [ ] 03-01-PLAN.md — End-to-end Parquet round-trip skeleton (from_parquet/to_parquet, snappy default) + Wave-0 arrow-rs fidelity gate (PARQ-01, PARQ-02)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 03-02-PLAN.md — Compression codecs (snappy/zstd/gzip/uncompressed, honest rejection) + row-count row-group sizing (PARQ-02, PARQ-03)
+
+**Wave 3** *(blocked on Waves 1-2)*
+
+- [ ] 03-03-PLAN.md — Predicate pushdown (row-group skip + exact row filter) + column projection (PARQ-04, PARQ-05)
+
+**Wave 4** *(blocked on Waves 1-3)*
+
+- [ ] 03-04-PLAN.md — Logical-type fidelity (tz + categorical/dictionary), WR-01/D-31 nullability fix, multi-file/directory read (PARQ-06, PARQ-01)
 
 ### Phase 4: Benchmark & Release Readiness
 
@@ -127,5 +143,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. Core Zero-Copy Round-Trip & Interop | 5/5 | Complete    | 2026-07-14 |
 | 2. Full Dtype & Structural Coverage | 5/5 | Complete    | 2026-07-23 |
-| 3. Parquet IO | 0/TBD | Not started | - |
+| 3. Parquet IO | 0/4 | Not started | - |
 | 4. Benchmark & Release Readiness | 0/TBD | Not started | - |
