@@ -14,7 +14,7 @@ Flint proves its reason to exist in four vertical slices. Phase 1 delivers the w
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Core Zero-Copy Round-Trip & Interop** - Round-trip a simple numeric/bool DataFrame through Arrow zero-copy, with strict mode, diagnostics, and PyCapsule interop working end-to-end (completed 2026-07-14)
-- [ ] **Phase 2: Full Dtype & Structural Coverage** - Extend the same conversion pipeline to nulls, strings, categoricals, datetime/timezone, timedelta, and multi-chunk tables
+- [x] **Phase 2: Full Dtype & Structural Coverage** - Extend the same conversion pipeline to nulls, strings, categoricals, datetime/timezone, timedelta, and multi-chunk tables (completed 2026-07-23)
 - [ ] **Phase 3: Parquet IO** - Read and write Parquet files with compression, row-group configuration, statistics, pushdown, and correct logical-type round-trip
 - [ ] **Phase 4: Benchmark & Release Readiness** - Prove the speed/memory claim against pyarrow and ship installable, cross-platform, uv-compatible wheels
 
@@ -126,6 +126,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Core Zero-Copy Round-Trip & Interop | 5/5 | Complete    | 2026-07-14 |
-| 2. Full Dtype & Structural Coverage | 5/5 | In Progress|  |
+| 2. Full Dtype & Structural Coverage | 5/5 | Complete    | 2026-07-23 |
 | 3. Parquet IO | 0/TBD | Not started | - |
 | 4. Benchmark & Release Readiness | 0/TBD | Not started | - |
