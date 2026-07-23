@@ -165,3 +165,10 @@ None - no external service configuration required.
 ---
 *Phase: 03-parquet-io*
 *Completed: 2026-07-23*
+
+## Self-Check: PASSED
+
+All created files verified present on disk (`crates/flint-core/src/parquet_io.rs`,
+`tests/rust/parquet_dictionary_tz_roundtrip.rs`, `tests/python/test_parquet_roundtrip.py`, this
+Summary). All task/docs commit hashes (`7c32e10`, `2bdf89a`, `8836e57`, `a03dfc6`) verified present
+in `git log`.

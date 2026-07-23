@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 3
-current_phase_name: Parquet IO
+current_phase: 03
+current_phase_name: parquet-io
 status: executing
-stopped_at: Phase 3 context gathered
-last_updated: "2026-07-23T10:59:43.102Z"
+stopped_at: Completed 03-01-PLAN.md
+last_updated: "2026-07-23T12:54:12.322Z"
 last_activity: 2026-07-23
-last_activity_desc: Phase 02 complete, transitioned to Phase 3
+last_activity_desc: Phase 03 execution started
 progress:
   total_phases: 3
   completed_phases: 2
-  total_plans: 10
-  completed_plans: 10
+  total_plans: 14
+  completed_plans: 11
 ---
 
 # Project State
@@ -23,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-15)
 
 **Core value:** Converting a pandas DataFrame to/from an Arrow Table should be zero-copy (or as close to it as physically possible) and measurably faster than pyarrow — this must work and must be provably faster, or the project has no reason to exist.
-**Current focus:** Phase 02 — Full Dtype & Structural Coverage
+**Current focus:** Phase 03 — parquet-io
 
 ## Current Position
 
-Phase: 3 — Parquet IO
-Plan: Not started
+Phase: 03 (parquet-io) — EXECUTING
+Plan: 2 of 4
 Status: Ready to execute
-Last activity: 2026-07-23 — Phase 02 complete, transitioned to Phase 3
+Last activity: 2026-07-23 — Phase 03 execution started
 
-Progress: [█████░░░░░] 50%
+Progress: [████████░░] 79%
 
 ## Performance Metrics
 
@@ -64,6 +64,7 @@ Progress: [█████░░░░░] 50%
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase quick P260715-smf | 12min | 2 tasks | 2 files |
+| Phase 03 P01 | 40min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -92,6 +93,8 @@ Recent decisions affecting current work:
 - [Phase 02 P03]: Categorical round-trip fidelity required two separate fixes: Field::new_dictionary + with_dict_is_ordered to stop from_pandas silently dropping the dictionary ordered flag, and a per-column-type-aware to_pandas types_mapper closure to stop dictionary columns reconstructing as ArrowDtype instead of real pd.Categorical.
 - [Phase 02 P05]: DIAG-01/DIAG-02 resolved via Strategy B -- import_column_via_pandas_stream now returns the observed RecordBatch count, and from_pandas corrects the already-computed ColumnConversionRecord post-hoc when count > 1, rather than giving plan_column its own chunk-count-aware second decision path. diagnostics.rs required no change. strict=True now correctly rejects multi-chunk columns with no bypass flag.
 - [Phase 02 gate tooling]: Post-merge/regression gates were sniffing to bare `cargo test`, which never rebuilds the installed PyO3 extension via `maturin develop` -- Python-visible regressions from merged Rust changes went undetected until a manual full pytest run after wave 5 (21 stale-build failures, all resolved by rebuilding, zero were real code defects). Fixed via explicit `workflow.build_command`/`workflow.test_command` in config.json so future waves/phases in this project catch this class of regression.
+- [Phase ?]: [Phase 03 P01]: Wave-0 A6 gate PASSED empirically -- arrow-rs default embedded ARROW:schema metadata preserves DataType::Dictionary(dict_is_ordered) and exact tz strings through a bare Parquet round-trip; Plans 02-04 rely on this default, no explicit schema-hint mechanism needed
+- [Phase ?]: [Phase 03 P01]: flint-core::parquet_io returns parquet::errors::ParquetError (not FlintError) since flint-core cannot depend on flint-python's pyo3-coupled error type; mapped to FlintError::Other at the from_parquet/to_parquet PyO3 boundary
 
 ### Pending Todos
 
@@ -122,6 +125,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-23T08:05:45.258Z
-Stopped at: Phase 3 context gathered
-Resume file: .planning/phases/03-parquet-io/03-CONTEXT.md
+Last session: 2026-07-23T12:54:06.413Z
+Stopped at: Completed 03-01-PLAN.md
+Resume file: None
