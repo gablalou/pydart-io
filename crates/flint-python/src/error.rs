@@ -34,6 +34,14 @@ pub enum FlintError {
     #[error("arrow error: {0}")]
     Arrow(#[from] arrow::error::ArrowError),
 
+    /// A `to_parquet` `compression` argument outside the four D-29 supported codecs.
+    ///
+    /// Carries the offending codec string so the raised Python exception names it directly (same
+    /// "no silent best-effort behavior" precedent as `UnsupportedColumn`) — an unrecognized codec
+    /// is never silently coerced to snappy or any other default.
+    #[error("unsupported compression codec {0:?}: expected one of \"snappy\", \"zstd\", \"gzip\", \"uncompressed\"")]
+    UnsupportedCodec(String),
+
     /// Any other conversion/runtime failure not covered by a more specific variant.
     #[error("{0}")]
     Other(String),
@@ -47,6 +55,10 @@ impl From<FlintError> for PyErr {
             // `flint`-owned exception naming the offending column/dtype (D-08 / RESEARCH.md
             // Pitfall 1) instead of relying on builtin exception hierarchy semantics.
             FlintError::UnsupportedColumn { .. } => PyFlintError::new_err(err.to_string()),
+            // Same treatment as `UnsupportedColumn` (D-29): a named, catchable `flint`-owned
+            // exception, not a builtin `ValueError` — a typo'd codec string is a user-facing
+            // input-validation failure, not an internal conversion error.
+            FlintError::UnsupportedCodec(_) => PyFlintError::new_err(err.to_string()),
             FlintError::Arrow(_) => PyValueError::new_err(err.to_string()),
             FlintError::Other(_) => PyValueError::new_err(err.to_string()),
         }

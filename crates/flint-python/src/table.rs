@@ -217,7 +217,7 @@ impl Table {
         })
     }
 
-    /// Write this `Table` to a Parquet file at `path` (PARQ-01, basic PARQ-02/D-28).
+    /// Write this `Table` to a Parquet file at `path` (PARQ-01/PARQ-02/PARQ-03).
     ///
     /// Accepts a `str` or `pathlib.Path` (D-20). Overwrites an existing file silently (D-22 --
     /// `std::fs::File::create` truncate semantics, enforced inside
@@ -227,8 +227,37 @@ impl Table {
     /// batch-gathering step (lines above), but a 0-row batch (the empty-table case) still writes
     /// a valid schema-only Parquet file rather than being rejected the way `to_pandas` rejects a
     /// genuinely batch-less Table (the empty-table decision, must_haves).
-    #[pyo3(signature = (path))]
-    fn to_parquet(&self, py: Python<'_>, path: PathBuf) -> PyResult<()> {
+    ///
+    /// `compression` (D-29, default `"snappy"` per D-28) selects one of exactly four codecs --
+    /// `"snappy"`/`"zstd"`/`"gzip"`/`"uncompressed"` -- validated by
+    /// `flint_core::parquet_io::build_writer_properties`'s exhaustive match; any other string
+    /// raises `flint.FlintError` (`FlintError::UnsupportedCodec`) naming the offending string, and
+    /// no file is written (validation happens before `File::create`). `row_group_size` (D-30,
+    /// default `1_048_576` rows, matching pyarrow's default) is a ROW COUNT, not a byte size --
+    /// `0` is rejected here (rather than reaching `set_max_row_group_row_count`'s internal
+    /// `assert_ne!(value, Some(0), ...)` panic) so a bad Python-side argument surfaces as a named
+    /// `FlintError`, never an aborted interpreter.
+    #[pyo3(signature = (path, compression="snappy", row_group_size=1_048_576))]
+    fn to_parquet(
+        &self,
+        py: Python<'_>,
+        path: PathBuf,
+        compression: &str,
+        row_group_size: usize,
+    ) -> PyResult<()> {
+        if row_group_size == 0 {
+            return Err(FlintError::Other(
+                "row_group_size must be greater than 0".to_string(),
+            )
+            .into());
+        }
+
+        let properties = flint_core::parquet_io::build_writer_properties(
+            compression,
+            row_group_size,
+        )
+        .map_err(|_| FlintError::UnsupportedCodec(compression.to_string()))?;
+
         let batches = self.inner.bind(py).get().batches().to_vec();
         let batch = match batches.len() {
             0 => {
@@ -244,7 +273,7 @@ impl Table {
             }
         };
 
-        flint_core::parquet_io::write_parquet(&batch, &path).map_err(|err| {
+        flint_core::parquet_io::write_parquet(&batch, &path, properties).map_err(|err| {
             FlintError::Other(format!("failed to write Parquet file {path:?}: {err}"))
         })?;
         Ok(())
