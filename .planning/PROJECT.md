@@ -52,7 +52,9 @@ Converting a pandas DataFrame to/from an Arrow Table should be zero-copy (or as 
 | Success measured by benchmark vs pyarrow | Speed/memory claims need hard numbers, not just "should be faster" | — Pending (Phase 4) |
 | Genuine zero-copy numpy borrow implemented by hand (not pyo3-arrow's `from_numpy()`) | pyo3-arrow's `from_numpy()` was found to copy via `PrimitiveArray::from_iter_values` even on its contiguous fast path — reading its source was necessary to catch this | ✓ Confirmed — Phase 1: pointer-identity proof + Rust allocation-counter proof both pass, forward and reverse |
 | Multi-chunk `from_pandas` truncation (CR-01) fixed via `arrow::compute::concat`, single-chunk path unchanged | Silent data loss on an ordinary `pd.concat` input was a credibility-breaking bug; the fix must not regress the certified single-chunk zero-copy path | ✓ Confirmed — Phase 1 re-verification: 6-row/2-chunk round-trip fixed, no regression to D-06 pointer-identity proof |
-| DIAG-01/DIAG-02 multi-chunk diagnostics-honesty gap deferred to Phase 2 (CONV-08) via recorded override, not fixed in Phase 1 | Root cause (`plan_column` has no chunk-count visibility) is the same mechanism CONV-08 needs to solve anyway; bundling avoids a throwaway patch | Deferred — tracked in `01-VERIFICATION.md` overrides, carried forward as a Phase 2 blocker/concern |
+| DIAG-01/DIAG-02 multi-chunk diagnostics-honesty gap deferred to Phase 2 (CONV-08) via recorded override, not fixed in Phase 1 | Root cause (`plan_column` has no chunk-count visibility) is the same mechanism CONV-08 needs to solve anyway; bundling avoids a throwaway patch | ✓ Confirmed — Phase 2 Plan 05: resolved via Strategy B (post-hoc `ColumnConversionRecord` correction), `strict=True` now correctly rejects multi-chunk columns |
+| `classify_dtype` restructured from `dtype.kind`-first to isinstance-first dispatch | Correctly distinguishing ArrowDtype/ExtensionDtype/numpy backends requires type identity, not just the dtype's numpy-compatibility `.kind` character — the `dtype.kind`-first approach couldn't honestly reject masked extension dtypes | ✓ Confirmed — Phase 2 Plan 01: foundation every subsequent dtype-family slice (string, categorical, datetime/tz, timedelta) extends |
+| Categorical round-trip fidelity requires two independent fixes, not one | `ordered` flag lives on Arrow `Field` (not `DataType`), and pandas `ArrowDtype` types_mapper is too blunt for dictionary columns — a single fix could not address both the import-side and export-side metadata loss | ✓ Confirmed — Phase 2 Plan 03: `Field::new_dictionary`+`with_dict_is_ordered` (import) and a per-column-type-aware `types_mapper` closure (export) |
 
 ## Evolution
 
@@ -72,4 +74,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-15 after Phase 1*
+*Last updated: 2026-07-23 after Phase 2*
