@@ -42,6 +42,16 @@ pub enum FlintError {
     #[error("unsupported compression codec {0:?}: expected one of \"snappy\", \"zstd\", \"gzip\", \"uncompressed\"")]
     UnsupportedCodec(String),
 
+    /// A `from_parquet` `filters=[(column, operator, value), ...]` tuple whose operator string is
+    /// outside the fixed D-25 six-operator set.
+    ///
+    /// Carries both the offending column and operator string so the raised Python exception names
+    /// them directly (same "no silent best-effort behavior" precedent as `UnsupportedColumn`/
+    /// `UnsupportedCodec`) -- an unrecognized operator is never silently dropped/ignored, which
+    /// would otherwise return too many rows (T-03-05).
+    #[error("unsupported filter operator {operator:?} on column {column:?}: expected one of \"==\", \"!=\", \"<\", \"<=\", \">\", \">=\"")]
+    UnsupportedFilterOperator { column: String, operator: String },
+
     /// Any other conversion/runtime failure not covered by a more specific variant.
     #[error("{0}")]
     Other(String),
@@ -59,6 +69,9 @@ impl From<FlintError> for PyErr {
             // exception, not a builtin `ValueError` — a typo'd codec string is a user-facing
             // input-validation failure, not an internal conversion error.
             FlintError::UnsupportedCodec(_) => PyFlintError::new_err(err.to_string()),
+            // Same treatment as UnsupportedCodec (D-25): a named, catchable flint-owned exception
+            // naming the offending column/operator, never a builtin exception.
+            FlintError::UnsupportedFilterOperator { .. } => PyFlintError::new_err(err.to_string()),
             FlintError::Arrow(_) => PyValueError::new_err(err.to_string()),
             FlintError::Other(_) => PyValueError::new_err(err.to_string()),
         }

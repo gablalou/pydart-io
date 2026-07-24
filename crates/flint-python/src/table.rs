@@ -36,6 +36,7 @@ use std::path::PathBuf;
 
 use arrow::array::Array;
 use arrow::compute::concat_batches;
+use flint_core::parquet_filter::{FilterExpr, Op, ScalarValue};
 use pyo3::prelude::*;
 use pyo3::types::{PyCapsule, PyCFunction, PyDict, PyTuple, PyType};
 use pyo3_arrow::PyTable;
@@ -43,6 +44,49 @@ use pyo3_arrow::PyTable;
 use crate::diagnostics;
 use crate::error::FlintError;
 use crate::pandas::{self, ColumnConversionRecord};
+
+/// Map a `filters=[(column, operator, value), ...]` tuple's operator string to the fixed D-25
+/// six-operator `Op` set. Any other string raises `FlintError::UnsupportedFilterOperator` naming
+/// the offending column + operator (D-25) -- never a silently skipped/ignored filter tuple.
+fn parse_filter_operator(column: &str, operator: &str) -> Result<Op, FlintError> {
+    match operator {
+        "==" => Ok(Op::Eq),
+        "!=" => Ok(Op::Ne),
+        "<" => Ok(Op::Lt),
+        "<=" => Ok(Op::Le),
+        ">" => Ok(Op::Gt),
+        ">=" => Ok(Op::Ge),
+        other => Err(FlintError::UnsupportedFilterOperator {
+            column: column.to_string(),
+            operator: other.to_string(),
+        }),
+    }
+}
+
+/// Extract a `filters=` tuple's Python value into `parquet_filter::ScalarValue`.
+///
+/// Checked in `bool -> int -> float -> str` order: Python's `bool` is a subclass of `int`, so
+/// `bool` MUST be checked first, or `True`/`False` would silently extract as `Int64(1)`/
+/// `Int64(0)` via PyO3's own `i64` extraction instead of the intended `Bool` variant.
+fn parse_filter_value(value: &Bound<'_, PyAny>) -> PyResult<ScalarValue> {
+    if let Ok(b) = value.extract::<bool>() {
+        return Ok(ScalarValue::Bool(b));
+    }
+    if let Ok(i) = value.extract::<i64>() {
+        return Ok(ScalarValue::Int64(i));
+    }
+    if let Ok(f) = value.extract::<f64>() {
+        return Ok(ScalarValue::Float64(f));
+    }
+    if let Ok(s) = value.extract::<String>() {
+        return Ok(ScalarValue::Utf8(s));
+    }
+    let type_name: String = value.get_type().name()?.extract()?;
+    Err(FlintError::Other(format!(
+        "unsupported filter value type {type_name:?}: expected int, float, bool, or str"
+    ))
+    .into())
+}
 
 /// `flint.Table`: a thin `#[pyclass]` composing `pyo3_arrow::PyTable` (D-01).
 #[pyclass(name = "Table")]
@@ -193,21 +237,53 @@ impl Table {
         Ok(df.unbind())
     }
 
-    /// Read a Parquet file at `path` into a `Table` (PARQ-01, D-19/D-20).
+    /// Read a Parquet file at `path` into a `Table` (PARQ-01, D-19/D-20), with an optional column
+    /// projection (`columns`, D-27/PARQ-05) and an optional AND-combined filter list (`filters`,
+    /// D-23/D-24/D-25, PARQ-04).
     ///
     /// Accepts a `str` or `pathlib.Path` (D-20) -- extracting directly as `PathBuf` uses PyO3's
     /// own `os.PathLike`-aware conversion, so any other argument type fails extraction with a
-    /// clear `TypeError` rather than being silently coerced. Delegates the actual file IO
-    /// entirely to the pyo3-free `flint_core::parquet_io::read_parquet` -- no `parquet`-crate
-    /// call happens in this crate. `column_reports: Vec::new()` (mirroring `from_pytable`'s
-    /// empty-report convention) since a Parquet read did not go through `from_pandas`'s
-    /// per-column plan. No `columns`/`filters` params in this plan (added in Plan 03).
+    /// clear `TypeError` rather than being silently coerced.
+    ///
+    /// `filters` is a flat list of `(column: str, operator: str, value)` 3-tuples (D-23) --
+    /// multiple tuples combine with AND only (D-24, no OR/nested-list support). Each tuple is
+    /// parsed ONCE, here, into a `flint_core::parquet_filter::FilterExpr`: the operator string is
+    /// mapped via `parse_filter_operator`'s exhaustive match (an unrecognized operator raises
+    /// `FlintError::UnsupportedFilterOperator` naming the column + operator, D-25 -- never a
+    /// silently skipped tuple), and the value is extracted via `parse_filter_value`. The resulting
+    /// `Vec<FilterExpr>` is built exactly once and passed to `read_parquet`, which is the single
+    /// place that consumes it for BOTH the row-group skip decision and the row-level filter
+    /// (single-source-of-truth; this classmethod never re-derives or re-parses it).
+    ///
+    /// Delegates the actual file IO entirely to the pyo3-free `flint_core::parquet_io::
+    /// read_parquet` -- no `parquet`-crate call happens in this crate. `column_reports:
+    /// Vec::new()` (mirroring `from_pytable`'s empty-report convention) since a Parquet read did
+    /// not go through `from_pandas`'s per-column plan.
     #[classmethod]
-    #[pyo3(signature = (path))]
-    fn from_parquet(_cls: &Bound<'_, PyType>, py: Python<'_>, path: PathBuf) -> PyResult<Self> {
-        let batch = flint_core::parquet_io::read_parquet(&path).map_err(|err| {
-            FlintError::Other(format!("failed to read Parquet file {path:?}: {err}"))
-        })?;
+    #[pyo3(signature = (path, columns=None, filters=None))]
+    fn from_parquet<'py>(
+        _cls: &Bound<'py, PyType>,
+        py: Python<'py>,
+        path: PathBuf,
+        columns: Option<Vec<String>>,
+        filters: Option<Vec<(String, String, Bound<'py, PyAny>)>>,
+    ) -> PyResult<Self> {
+        let filter_exprs: Vec<FilterExpr> = match filters {
+            Some(tuples) => tuples
+                .into_iter()
+                .map(|(column, operator, value)| {
+                    let op = parse_filter_operator(&column, &operator)?;
+                    let value = parse_filter_value(&value)?;
+                    Ok::<FilterExpr, PyErr>(FilterExpr { column, op, value })
+                })
+                .collect::<PyResult<Vec<FilterExpr>>>()?,
+            None => Vec::new(),
+        };
+
+        let batch = flint_core::parquet_io::read_parquet(&path, columns.as_deref(), &filter_exprs)
+            .map_err(|err| {
+                FlintError::Other(format!("failed to read Parquet file {path:?}: {err}"))
+            })?;
         let schema = batch.schema();
         let py_table = PyTable::try_new(vec![batch], schema)?;
 

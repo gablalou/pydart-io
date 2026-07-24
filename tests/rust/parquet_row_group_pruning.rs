@@ -7,27 +7,25 @@
 //! correctness (which `parquet_filter::could_match_range`'s own unit tests already cover in
 //! isolation, without needing a real Parquet file).
 //!
-//! Task 1 commit: this probe calls `flint_core::parquet_filter::could_match_range` directly
-//! against `StatisticsConverter`-extracted row-group min/max stats, because
-//! `flint_core::parquet_io::surviving_row_groups` does not exist until Task 2. Task 2 upgrades
-//! this file to call the real `surviving_row_groups` instead of duplicating its loop here, per
-//! 03-03-PLAN.md's explicit instruction that "the committed end state must call the real
-//! surviving_row_groups."
+//! Task 2 upgrade: this probe now calls the REAL `flint_core::parquet_io::surviving_row_groups`
+//! directly (rather than duplicating its skip-decision loop against `could_match_range`, as the
+//! Task 1 stub version of this file did) -- per 03-03-PLAN.md's explicit instruction that "the
+//! committed end state must call the real surviving_row_groups."
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use arrow::array::{Array, ArrayRef, AsArray, Int64Array};
-use arrow::datatypes::{DataType, Field, Int64Type, Schema};
+use arrow::array::Int64Array;
+use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use parquet::arrow::arrow_reader::statistics::StatisticsConverter;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::arrow::ArrowWriter;
 use parquet::file::properties::{EnabledStatistics, WriterProperties};
 use parquet::schema::types::ColumnPath;
 
-use flint_core::parquet_filter::{could_match_range, Op, ScalarValue};
+use flint_core::parquet_filter::{FilterExpr, Op, ScalarValue};
+use flint_core::parquet_io::surviving_row_groups;
 
 static FIXTURE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -72,77 +70,81 @@ fn write_three_row_group_fixture() -> PathBuf {
     path
 }
 
-fn int64_scalar_at(array: &ArrayRef, idx: usize) -> Option<ScalarValue> {
-    if array.is_null(idx) {
-        return None;
-    }
-    Some(ScalarValue::Int64(array.as_primitive::<Int64Type>().value(idx)))
-}
-
-/// Duplicates the row-group-skip decision loop `surviving_row_groups` (Task 2) will own,
-/// calling `could_match_range` directly against real `StatisticsConverter` output.
-fn surviving_via_could_match_range(path: &Path, column: &str, op: Op, value: ScalarValue) -> Vec<usize> {
+/// Calls the REAL `flint_core::parquet_io::surviving_row_groups` against the fixture's own
+/// `ParquetMetaData`/schemas for a single `FilterExpr` -- this is the actual PARQ-04
+/// skip-engagement assertion (Task 2), not a re-derived stand-in.
+fn surviving_for(path: &PathBuf, column: &str, op: Op, value: ScalarValue) -> Vec<usize> {
     let file = std::fs::File::open(path).expect("open fixture");
     let builder = ParquetRecordBatchReaderBuilder::try_new(file).expect("build reader");
     let arrow_schema = builder.schema().clone();
     let parquet_schema = builder.parquet_schema().clone();
     let metadata = builder.metadata().clone();
 
-    let converter =
-        StatisticsConverter::try_new(column, &arrow_schema, &parquet_schema).expect("converter");
-    let mins = converter
-        .row_group_mins(metadata.row_groups().iter())
-        .expect("row group mins");
-    let maxes = converter
-        .row_group_maxes(metadata.row_groups().iter())
-        .expect("row group maxes");
-
-    (0..metadata.num_row_groups())
-        .filter(|&i| {
-            let min = int64_scalar_at(&mins, i);
-            let max = int64_scalar_at(&maxes, i);
-            could_match_range(op, &value, min.as_ref(), max.as_ref())
-        })
-        .collect()
+    let filters = vec![FilterExpr {
+        column: column.to_string(),
+        op,
+        value,
+    }];
+    surviving_row_groups(&metadata, &arrow_schema, &parquet_schema, &filters)
+        .expect("surviving_row_groups")
 }
 
 #[test]
 fn col_gt_250_keeps_only_last_row_group() {
     let path = write_three_row_group_fixture();
-    let surviving = surviving_via_could_match_range(&path, "x", Op::Gt, ScalarValue::Int64(250));
+    let surviving = surviving_for(&path, "x", Op::Gt, ScalarValue::Int64(250));
     assert_eq!(surviving, vec![2]);
 }
 
 #[test]
 fn col_lt_50_keeps_only_first_row_group() {
     let path = write_three_row_group_fixture();
-    let surviving = surviving_via_could_match_range(&path, "x", Op::Lt, ScalarValue::Int64(50));
+    let surviving = surviving_for(&path, "x", Op::Lt, ScalarValue::Int64(50));
     assert_eq!(surviving, vec![0]);
 }
 
 #[test]
 fn col_ge_100_and_lt_200_keeps_only_middle_row_group() {
-    // AND semantics (D-24): intersect two independent could_match_range decisions.
+    // AND semantics (D-24): pass both filters together so surviving_row_groups itself performs
+    // the intersection (the real AND-combined code path), not a post-hoc Vec intersection here.
     let path = write_three_row_group_fixture();
-    let ge_100 = surviving_via_could_match_range(&path, "x", Op::Ge, ScalarValue::Int64(100));
-    let lt_200 = surviving_via_could_match_range(&path, "x", Op::Lt, ScalarValue::Int64(200));
-    let surviving: Vec<usize> = ge_100.into_iter().filter(|i| lt_200.contains(i)).collect();
+    let file = std::fs::File::open(&path).expect("open fixture");
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file).expect("build reader");
+    let arrow_schema = builder.schema().clone();
+    let parquet_schema = builder.parquet_schema().clone();
+    let metadata = builder.metadata().clone();
+
+    let filters = vec![
+        FilterExpr {
+            column: "x".to_string(),
+            op: Op::Ge,
+            value: ScalarValue::Int64(100),
+        },
+        FilterExpr {
+            column: "x".to_string(),
+            op: Op::Lt,
+            value: ScalarValue::Int64(200),
+        },
+    ];
+    let surviving = surviving_row_groups(&metadata, &arrow_schema, &parquet_schema, &filters)
+        .expect("surviving_row_groups");
     assert_eq!(surviving, vec![1]);
 }
 
 #[test]
 fn col_eq_1000_keeps_no_row_group() {
     let path = write_three_row_group_fixture();
-    let surviving = surviving_via_could_match_range(&path, "x", Op::Eq, ScalarValue::Int64(1000));
+    let surviving = surviving_for(&path, "x", Op::Eq, ScalarValue::Int64(1000));
     assert!(surviving.is_empty());
 }
 
 #[test]
 fn filter_on_stats_less_column_keeps_all_row_groups() {
     // "y" has row-group statistics explicitly disabled in the fixture -- StatisticsConverter
-    // resolves this to null min/max per row group, which could_match_range must treat as
-    // conservatively-keep for every row group (never skip on missing stats).
+    // resolves this to null min/max per row group, which surviving_row_groups (via
+    // could_match_range) must treat as conservatively-keep for every row group (never skip on
+    // missing stats).
     let path = write_three_row_group_fixture();
-    let surviving = surviving_via_could_match_range(&path, "y", Op::Gt, ScalarValue::Int64(999_999));
+    let surviving = surviving_for(&path, "y", Op::Gt, ScalarValue::Int64(999_999));
     assert_eq!(surviving, vec![0, 1, 2]);
 }
