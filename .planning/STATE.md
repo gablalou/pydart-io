@@ -4,16 +4,16 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 03
 current_phase_name: parquet-io
-status: executing
-stopped_at: Completed 03-03-PLAN.md
-last_updated: "2026-07-24T05:02:56.728Z"
+status: verifying
+stopped_at: Completed 03-04-PLAN.md
+last_updated: "2026-07-24T05:50:28.549Z"
 last_activity: 2026-07-23
 last_activity_desc: Phase 03 execution started
 progress:
   total_phases: 3
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 14
-  completed_plans: 13
+  completed_plans: 14
 ---
 
 # Project State
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-07-15)
 
 Phase: 03 (parquet-io) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-07-23 — Phase 03 execution started
 
-Progress: [█████████░] 93%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -67,6 +67,7 @@ Progress: [█████████░] 93%
 | Phase 03 P01 | 40min | 3 tasks | 6 files |
 | Phase 03 P02 | 10min | 2 tasks | 4 files |
 | Phase 03-parquet-io P03 | resumed | 3 tasks | 7 files |
+| Phase 03 P04 | 39min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -101,6 +102,9 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 03 P02]: Confirmed set_max_row_group_row_count (not deprecated set_max_row_group_size, not byte-based set_max_row_group_bytes) as the correct row-count row-group setter for pinned parquet 59.1.0 by reading the vendored crate source directly
 - [Phase ?]: ScalarValue is a plain, arrow-crate-free enum (Int64/Float64/Bool/Utf8); Int64/Float64 cross-type comparisons widen to f64; Utf8 column stats are never trusted for row-group pruning (truncation risk) though still filtered exactly via RowFilter; filter-value extraction checks bool before int before float before str.
 - [Phase ?]: Resumed a mid-task interruption (prior executor terminated by a provider session/usage-limit error): reviewed uncommitted parquet_io.rs/error.rs work as already correct, completed only the missing table.rs wiring gap.
+- [Phase ?]: [Phase 03 P04]: WR-01/D-31 fixed -- build_field sources nullability from declared source pandas schema, not observed null_count(); resolves the 02-REVIEW.md concat_tables ArrowInvalid failure
+- [Phase ?]: [Phase 03 P04]: D-21 multi-file/directory Parquet read delivered with strict cross-file schema-match (ParquetSchemaMismatch on divergence, never silent union) and deterministic lexicographic directory ordering
+- [Phase ?]: [Phase 03 P04]: CHECKPOINT (user-approved, Option A) -- categorical/dictionary Parquet fidelity tests scoped to what arrow-rs's DictEncoder actually guarantees (DataType::Dictionary, dict_is_ordered, per-row values); exact .cat.categories order and unused-category retention are NOT guaranteed (arrow-rs-vs-pyarrow divergence, no WriterProperties fix in parquet 59.1.0) -- documented as accepted risk, real correctness concern only for ordered categoricals
 
 ### Pending Todos
 
@@ -109,11 +113,12 @@ None yet.
 ### Blockers/Concerns
 
 - ~~Phase 2 (carried forward from Phase 1 verification override): CONV-08 DIAG-01/DIAG-02 multi-chunk diagnostics honesty gap~~ -- **Resolved** in Phase 2 Plan 05 (see 02-VERIFICATION.md and 02-05-SUMMARY.md).
-- Phase 3 (from 02-REVIEW.md WR-01, demonstrated/reproducible): `build_field` in `crates/flint-python/src/pandas.rs` derives Arrow field nullability from the current batch's observed `null_count() > 0` rather than the source pandas dtype's declared nullability. A nullable `int64[pyarrow]` column with zero nulls round-trips as a `not null` Flint schema field, which breaks `pyarrow.concat_tables` against a genuinely-nullable sibling batch (`ArrowInvalid` schema mismatch). Not fixed as of Phase 2 close; worth fixing before/during Phase 3 given Parquet schema fidelity is exactly this class of concern.
+- ~~Phase 3 (from 02-REVIEW.md WR-01, demonstrated/reproducible): `build_field` in `crates/flint-python/src/pandas.rs` derives Arrow field nullability from the current batch's observed `null_count() > 0` rather than the source pandas dtype's declared nullability.~~ -- **Resolved** in Phase 3 Plan 04 (see 03-04-SUMMARY.md): `build_field` now sources nullability from the declared source schema; `concat_tables` reproduction test passes.
 - Phase 3 (from 02-REVIEW.md WR-02, structurally real but not reproduced under pinned config): the zero-copy numpy buffer borrow (`borrow_numpy_numeric_column`/`NumpyBufferOwner`) has no independent immutability guarantee — it relies entirely on pandas' Copy-on-Write to prevent post-borrow mutation from corrupting the Arrow buffer. Did not reproduce under pinned pandas 3.0.3 (CoW blocked all three tried mutation paths), but CLAUDE.md claims `pandas >= 2.2` support with no runtime floor pinned in pyproject.toml, and CoW is off by default pre-3.0 — a latent gap on nominally-supported configurations.
 - Phase 3 (research-flagged): categorical/dictionary Parquet round-trip edge cases and tz-aware timestamp handling warrant verification against current pyarrow issues (#35259, #1688) at plan time.
 - Phase 3 (research-flagged): confirm pandas ArrowDtype import-side support status (pandas 3.0.x) before finalizing pandas-interop reverse direction — may affect Phase 2 design already, verify at Phase 2 plan time too.
 - Phase 4 (research-flagged): benchmarking methodology (criterion/pytest-benchmark/codspeed) and manylinux/glibc floor are MEDIUM-confidence, task-derived recommendations — validate current best practice at plan time.
+- Phase 3 (accepted, documented -- see 03-04-SUMMARY.md Known Gap): arrow-rs's ArrowWriter/DictEncoder reassigns dictionary keys in first-occurrence-during-encoding order and drops unused categories on Parquet write, so a categorical's .cat.categories order and unused categories do NOT survive a Parquet round-trip (values and dict_is_ordered DO survive correctly). Cosmetic for unordered categoricals; a real correctness concern for ordered categoricals since the < relationship between categories can silently change. No WriterProperties fix exists in parquet 59.1.0 (arrow-rs-only constraint); pyarrow does not share this limitation. Surface in Phase 4 release docs if categorical fidelity is a headline interop claim.
 
 ### Quick Tasks Completed
 
@@ -131,6 +136,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-24T05:02:56.722Z
-Stopped at: Completed 03-03-PLAN.md
+Last session: 2026-07-24T05:50:28.540Z
+Stopped at: Completed 03-04-PLAN.md
 Resume file: None

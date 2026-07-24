@@ -35,7 +35,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **PARQ-03**: User can configure row-group size on write
 - [x] **PARQ-04**: Written Parquet files include row-group statistics enabling predicate pushdown on read
 - [x] **PARQ-05**: User can apply column projection and predicate pushdown when reading Parquet
-- [ ] **PARQ-06**: Parquet round-trip preserves logical types correctly (tz-aware timestamps, categorical/dictionary encoding)
+- [x] **PARQ-06**: Parquet round-trip preserves logical types correctly (tz-aware timestamps, categorical/dictionary encoding)
 
 ### Benchmarking
 
@@ -90,7 +90,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PARQ-03 | Phase 3 | Complete |
 | PARQ-04 | Phase 3 | Complete |
 | PARQ-05 | Phase 3 | Complete |
-| PARQ-06 | Phase 3 | Pending |
+| PARQ-06 | Phase 3 | Complete |
 | BENCH-01 | Phase 4 | Pending |
 | BENCH-02 | Phase 4 | Pending |
 | PKG-01 | Phase 4 | Pending |
