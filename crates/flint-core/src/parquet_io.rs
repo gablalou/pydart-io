@@ -297,11 +297,12 @@ fn read_raw_schema(path: &Path) -> Result<Arc<Schema>, ParquetError> {
     Ok(builder.schema().clone())
 }
 
-/// Return the name of the first column at which two schemas disagree (by name, `DataType`, and
-/// nullability), or `None` if every field matches positionally. Deliberately narrower than
-/// `Field`'s full `PartialEq` (which also compares dictionary-ordering/metadata) -- this project
-/// cares about D-21's "the same logical column" contract, not incidental metadata differences a
-/// writer might attach.
+/// Return the name of the first column at which two schemas disagree (by name, `DataType`,
+/// nullability, and dictionary-ordering for `Dictionary` columns), or `None` if every field
+/// matches positionally. Deliberately narrower than `Field`'s full `PartialEq` (which also
+/// compares arbitrary metadata) -- this project cares about D-21's "the same logical column"
+/// contract, not incidental metadata differences a writer might attach; see `fields_match`'s doc
+/// comment for why `dict_is_ordered` is schema-significant rather than incidental.
 fn first_schema_mismatch(a: &Schema, b: &Schema) -> Option<String> {
     let a_fields = a.fields();
     let b_fields = b.fields();
@@ -321,12 +322,20 @@ fn first_schema_mismatch(a: &Schema, b: &Schema) -> Option<String> {
     None
 }
 
-/// Compare two `Field`s for D-21's "same logical column" purposes: name, `DataType`, and
-/// nullability -- NOT `Field`'s full `PartialEq` (which also compares dictionary-ordering and
-/// arbitrary metadata that can legitimately differ between two files carrying the same logical
-/// column).
+/// Compare two `Field`s for D-21's "same logical column" purposes: name, `DataType`, nullability,
+/// and (for a `DataType::Dictionary` column) `dict_is_ordered` -- NOT `Field`'s full `PartialEq`
+/// (which also compares arbitrary metadata that can legitimately differ between two files
+/// carrying the same logical column). `dict_is_ordered` is schema-significant, not incidental: it
+/// changes the comparison/sort semantics of the reconstructed `pd.Categorical` (`ordered=True`
+/// enables `<`/`>` comparisons a `pd.Categorical(ordered=False)` raises `TypeError` for), and
+/// `from_pandas`'s equivalent classification (`pandas.rs`'s `build_field`) treats it as
+/// schema-significant too -- so two dictionary columns differing only in `ordered` must trip
+/// D-21's strict cross-file schema-match check, not silently pass it.
 fn fields_match(a: &Field, b: &Field) -> bool {
-    a.name() == b.name() && a.data_type() == b.data_type() && a.is_nullable() == b.is_nullable()
+    a.name() == b.name()
+        && a.data_type() == b.data_type()
+        && a.is_nullable() == b.is_nullable()
+        && a.dict_is_ordered() == b.dict_is_ordered()
 }
 
 /// Decide, for each row group, whether it MIGHT contain a row matching every filter in `filters`
