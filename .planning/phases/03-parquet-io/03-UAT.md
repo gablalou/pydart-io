@@ -1,22 +1,14 @@
 ---
-status: testing
+status: complete
 phase: 03-parquet-io
 source: [03-VERIFICATION.md]
 started: 2026-07-24T06:40:46Z
-updated: 2026-07-24T06:40:46Z
+updated: 2026-07-24T06:53:00Z
 ---
 
 ## Current Test
 
-number: 1
-name: Write-interruption durability (process kill / disk full mid-to_parquet)
-expected: |
-  A partial/truncated Parquet file may be left on disk — `std::fs::File::create` truncates the
-  target up front, and Flint provides no atomic-write/temp-then-rename guarantee. This is the
-  disclosed, accepted design (all four plans' threat models treat this as caller responsibility),
-  not a code defect. Confirm this matches your operational expectations before shipping to users
-  who might rely on write atomicity.
-awaiting: user response
+[testing complete]
 
 ## Tests
 
@@ -26,7 +18,7 @@ expected: |
   large `Table`, then inspect the target file. A partial/truncated Parquet file may be left on
   disk — no atomic-write/temp-then-rename guarantee exists. This is disclosed, accepted design,
   not a code defect.
-result: [pending]
+result: pass
 
 ### 2. Concurrent-write races on the same path
 expected: |
@@ -35,14 +27,14 @@ expected: |
   interleaved write). Undefined/OS-dependent outcome — Flint does not synchronize writers to the
   same path. Concurrent reads of a file that is not simultaneously being written are safe
   (verified structurally: no shared mutable state in the Parquet read path).
-result: [pending]
+result: pass
 
 ## Summary
 
 total: 2
-passed: 0
+passed: 2
 issues: 0
-pending: 2
+pending: 0
 skipped: 0
 blocked: 0
 
