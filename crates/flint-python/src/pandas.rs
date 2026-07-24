@@ -394,12 +394,20 @@ pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandas
             validate_object_column_contents(&series, &column_name_str)?;
         }
 
-        let array = match (&plan, dtype_backend, &arrow_kind) {
+        // D-31/WR-01: `is_nullable` is threaded from the DECLARED source nullability (the
+        // stream-imported schema's `Field::is_nullable()`, or a hard-coded `false` for the
+        // numpy-buffer fast path below), NEVER derived from `array.null_count() > 0` -- see
+        // `build_field`'s doc comment for the full rationale and the concrete WR-01 failure
+        // this fixes.
+        let (array, is_nullable) = match (&plan, dtype_backend, &arrow_kind) {
             (ColumnPlan::ZeroCopyBorrow, DtypeBackend::Numpy, ArrowKind::Numeric) => {
-                borrow_numpy_numeric_column(&series, &column_name_str)?
+                // This dtype family (contiguous numpy numeric) cannot represent nulls -- keep
+                // hard-coded `false` unchanged (RESEARCH.md explicit call-out, does NOT go
+                // through import_column_via_pandas_stream at all).
+                (borrow_numpy_numeric_column(&series, &column_name_str)?, false)
             }
             _ => {
-                let (array, observed_batch_count) =
+                let (array, observed_batch_count, declared_nullable) =
                     import_column_via_pandas_stream(py, df, &column_name)?;
                 // D-13 / RESEARCH.md Pitfall 6 Strategy B: plan_column's a-priori ColumnPlan
                 // (already pushed into `records` above) has no chunk-count visibility -- it is
@@ -424,7 +432,7 @@ pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandas
                         ));
                     }
                 }
-                array
+                (array, declared_nullable)
             }
         };
 
@@ -441,7 +449,12 @@ pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandas
         } else {
             None
         };
-        fields.push(build_field(&column_name_str, array.as_ref(), is_ordered));
+        fields.push(build_field(
+            &column_name_str,
+            array.as_ref(),
+            is_ordered,
+            is_nullable,
+        ));
         arrays.push(array);
     }
 
@@ -452,7 +465,8 @@ pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandas
 }
 
 /// Build a column's `Field`, propagating the dictionary `ordered` flag (D-17 / Pitfall 3) for
-/// `DataType::Dictionary`-typed columns.
+/// `DataType::Dictionary`-typed columns and the DECLARED source nullability (D-31/WR-01) for
+/// every column.
 ///
 /// `Field::dict_is_ordered` lives on `Field`, not `DataType` -- `array.data_type().clone()`
 /// alone can never carry it forward, so any `DataType::Dictionary` column MUST be constructed
@@ -461,16 +475,30 @@ pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandas
 /// `is_ordered` is `None` for any non-categorical column (defaults to `false`, matching
 /// arrow-rs's own default) and `Some(dtype.ordered)` for a genuine pandas `Categorical` column
 /// (sourced from the pandas source dtype in `from_pandas`, not re-derived here).
-fn build_field(column_name: &str, array: &dyn Array, is_ordered: Option<bool>) -> Field {
+///
+/// **D-31/WR-01 (02-REVIEW.md WR-01 fix):** `is_nullable` MUST be the column's DECLARED source
+/// nullability (threaded in from `from_pandas`'s call site -- either
+/// `import_column_via_pandas_stream`'s returned schema nullability, or a hard-coded `false` for
+/// the `borrow_numpy_numeric_column` fast path), NEVER `array.null_count() > 0`. Deriving
+/// nullability from the CURRENT batch's observed null count conflates "this batch happens to
+/// have zero nulls right now" with "this column's type cannot hold nulls" -- a nullable
+/// `int64[pyarrow]` column with zero nulls would otherwise round-trip as a `not null` Flint
+/// schema field, breaking `pyarrow.concat_tables` against a genuinely-nullable sibling batch
+/// (the exact reproduction in 02-REVIEW.md). Because pyarrow's `__arrow_c_stream__` export marks
+/// EVERY column `nullable=True` (verified empirically, RESEARCH.md Summary/A5), this uniformly
+/// broadens every stream-imported column to `nullable=True` -- an intentional, documented,
+/// permissive/safe broadening (never breaks `concat_tables` the way a wrongly-`non-nullable`
+/// field does), not a regression.
+fn build_field(column_name: &str, array: &dyn Array, is_ordered: Option<bool>, is_nullable: bool) -> Field {
     match array.data_type() {
         DataType::Dictionary(key_type, value_type) => Field::new_dictionary(
             column_name,
             (**key_type).clone(),
             (**value_type).clone(),
-            array.null_count() > 0,
+            is_nullable,
         )
         .with_dict_is_ordered(is_ordered.unwrap_or(false)),
-        other => Field::new(column_name, other.clone(), array.null_count() > 0),
+        other => Field::new(column_name, other.clone(), is_nullable),
     }
 }
 
@@ -497,16 +525,22 @@ fn build_field(column_name: &str, array: &dyn Array, is_ordered: Option<bool>) -
 /// is not a malformed stream), so it is handled by constructing a genuinely empty array of the
 /// column's Arrow type directly from the schema, rather than treated as an error.
 ///
-/// Returns `(array, observed_batch_count)` (D-13 / RESEARCH.md Pitfall 6 Strategy B): the caller
-/// (`from_pandas`) uses the observed batch count to correct that column's already-computed
-/// `ColumnConversionRecord` post-hoc when `observed_batch_count > 1` -- this function itself does
-/// not know about `ColumnConversionRecord`/diagnostics at all, it only surfaces the count it
-/// already has on hand from the branch it took.
+/// Returns `(array, observed_batch_count, declared_is_nullable)`. `observed_batch_count` (D-13 /
+/// RESEARCH.md Pitfall 6 Strategy B): the caller (`from_pandas`) uses the observed batch count to
+/// correct that column's already-computed `ColumnConversionRecord` post-hoc when
+/// `observed_batch_count > 1` -- this function itself does not know about
+/// `ColumnConversionRecord`/diagnostics at all, it only surfaces the count it already has on
+/// hand from the branch it took. `declared_is_nullable` (D-31/WR-01) is
+/// `schema.field(0).is_nullable()` -- the DECLARED nullability pyarrow's own
+/// `__arrow_c_stream__` export puts on the schema, captured here (before it would otherwise sit
+/// unused) and threaded by the caller into `build_field`, replacing the previous
+/// `array.null_count() > 0` derivation. This is read from the schema once, up front, so it is
+/// available identically on the empty-batch, single-batch, and multi-batch paths below.
 fn import_column_via_pandas_stream(
     py: Python<'_>,
     df: &Bound<'_, PyAny>,
     column_name: &Bound<'_, PyAny>,
-) -> PyResult<(ArrayRef, usize)> {
+) -> PyResult<(ArrayRef, usize, bool)> {
     let single_column_selector = PyList::new(py, [column_name])?;
     let single_column_df = df.get_item(single_column_selector)?;
     let capsule: Bound<'_, PyCapsule> = single_column_df
@@ -514,20 +548,21 @@ fn import_column_via_pandas_stream(
         .extract()?;
     let py_table = PyTable::from_arrow_pycapsule(&capsule)?;
     let (batches, schema) = py_table.into_inner();
+    let declared_is_nullable = schema.field(0).is_nullable();
 
     if batches.is_empty() {
         let data_type = schema.field(0).data_type();
-        return Ok((arrow::array::new_empty_array(data_type), 0));
+        return Ok((arrow::array::new_empty_array(data_type), 0, declared_is_nullable));
     }
 
     if batches.len() == 1 {
-        return Ok((batches[0].column(0).clone(), 1));
+        return Ok((batches[0].column(0).clone(), 1, declared_is_nullable));
     }
 
     let columns: Vec<ArrayRef> = batches.iter().map(|b| b.column(0).clone()).collect();
     let column_refs: Vec<&dyn Array> = columns.iter().map(|c| c.as_ref()).collect();
     let concatenated = arrow::compute::concat(&column_refs).map_err(FlintError::from)?;
-    Ok((concatenated, batches.len()))
+    Ok((concatenated, batches.len(), declared_is_nullable))
 }
 
 /// Flint-owned content validation for a legacy numpy object-dtype column (D-11 / RESEARCH.md
