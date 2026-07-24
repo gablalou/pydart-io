@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Core Zero-Copy Round-Trip & Interop** - Round-trip a simple numeric/bool DataFrame through Arrow zero-copy, with strict mode, diagnostics, and PyCapsule interop working end-to-end (completed 2026-07-14)
 - [x] **Phase 2: Full Dtype & Structural Coverage** - Extend the same conversion pipeline to nulls, strings, categoricals, datetime/timezone, timedelta, and multi-chunk tables (completed 2026-07-23)
-- [ ] **Phase 3: Parquet IO** - Read and write Parquet files with compression, row-group configuration, statistics, pushdown, and correct logical-type round-trip
+- [x] **Phase 3: Parquet IO** - Read and write Parquet files with compression, row-group configuration, statistics, pushdown, and correct logical-type round-trip (completed 2026-07-24)
 - [ ] **Phase 4: Benchmark & Release Readiness** - Prove the speed/memory claim against pyarrow and ship installable, cross-platform, uv-compatible wheels
 
 ## Phase Details
@@ -143,5 +143,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. Core Zero-Copy Round-Trip & Interop | 5/5 | Complete    | 2026-07-14 |
 | 2. Full Dtype & Structural Coverage | 5/5 | Complete    | 2026-07-23 |
-| 3. Parquet IO | 4/4 | In Progress|  |
+| 3. Parquet IO | 4/4 | Complete    | 2026-07-24 |
 | 4. Benchmark & Release Readiness | 0/TBD | Not started | - |
