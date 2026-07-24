@@ -12,14 +12,13 @@ Converting a pandas DataFrame to/from an Arrow Table should be zero-copy (or as 
 
 ### Validated
 
-(None yet — ship to validate)
+- ✓ Read/write Parquet files — Phase 3 (`from_parquet`/`to_parquet`: compression codec selection, row-group sizing, statistics-driven predicate pushdown + column projection, multi-file/directory read, logical-type fidelity for tz-aware timestamps and categorical/dictionary columns)
 
 ### Active
 
 - [ ] Zero-copy (or minimal-copy) conversion from pandas DataFrame to Arrow-compatible Table, implemented in Rust with Python bindings
 - [ ] Zero-copy (or minimal-copy) conversion from Arrow-compatible Table back to pandas DataFrame
 - [ ] Arrow columnar memory format compatibility (interoperates with the existing Arrow/Parquet ecosystem — Polars, DuckDB, etc.)
-- [ ] Read/write Parquet files
 - [ ] Benchmark suite comparing conversion speed and memory usage directly against pyarrow
 
 ### Out of Scope
@@ -55,6 +54,8 @@ Converting a pandas DataFrame to/from an Arrow Table should be zero-copy (or as 
 | DIAG-01/DIAG-02 multi-chunk diagnostics-honesty gap deferred to Phase 2 (CONV-08) via recorded override, not fixed in Phase 1 | Root cause (`plan_column` has no chunk-count visibility) is the same mechanism CONV-08 needs to solve anyway; bundling avoids a throwaway patch | ✓ Confirmed — Phase 2 Plan 05: resolved via Strategy B (post-hoc `ColumnConversionRecord` correction), `strict=True` now correctly rejects multi-chunk columns |
 | `classify_dtype` restructured from `dtype.kind`-first to isinstance-first dispatch | Correctly distinguishing ArrowDtype/ExtensionDtype/numpy backends requires type identity, not just the dtype's numpy-compatibility `.kind` character — the `dtype.kind`-first approach couldn't honestly reject masked extension dtypes | ✓ Confirmed — Phase 2 Plan 01: foundation every subsequent dtype-family slice (string, categorical, datetime/tz, timedelta) extends |
 | Categorical round-trip fidelity requires two independent fixes, not one | `ordered` flag lives on Arrow `Field` (not `DataType`), and pandas `ArrowDtype` types_mapper is too blunt for dictionary columns — a single fix could not address both the import-side and export-side metadata loss | ✓ Confirmed — Phase 2 Plan 03: `Field::new_dictionary`+`with_dict_is_ordered` (import) and a per-column-type-aware `types_mapper` closure (export) |
+| Row-group-level pruning is an optimization layered strictly under exact row-level filtering, never a replacement for it | Statistics-driven skip decisions can only prove "no match possible" (conservative); only `RowFilter`/`ArrowPredicateFn` per-row evaluation guarantees zero false positives, so both must derive from one parsed `FilterExpr` list, never re-derived independently | ✓ Confirmed — Phase 3 Plan 03: `surviving_row_groups` isolated skip-engagement proof + 36-case six-operator boundary property test; a related CR-01 code-review finding (silent row-drop on out-of-range integer filter casts) was fixed and independently re-verified |
+| Categorical `.cat.categories` order and unused-category retention are NOT preserved through a Parquet round-trip | Confirmed arrow-rs `ArrowWriter`/`DictEncoder` limitation (reassigns dictionary keys in first-occurrence-during-encoding order) with no `WriterProperties` fix in parquet 59.1.0; pyarrow does not share this limitation. Accepted rather than hand-rolling a Parquet column writer (against "Don't Hand-Roll" guidance) | ✓ Accepted — Phase 3 Plan 04, user checkpoint decision; regression-pinned by `test_ordered_categorical_category_order_not_guaranteed_known_gap`; flag in Phase 4 release docs if categorical fidelity is a headline interop claim |
 
 ## Evolution
 
@@ -74,4 +75,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-23 after Phase 2*
+*Last updated: 2026-07-24 after Phase 3*
