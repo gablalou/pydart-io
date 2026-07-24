@@ -52,6 +52,39 @@ pub enum FlintError {
     #[error("unsupported filter operator {operator:?} on column {column:?}: expected one of \"==\", \"!=\", \"<\", \"<=\", \">\", \">=\"")]
     UnsupportedFilterOperator { column: String, operator: String },
 
+    /// A `from_parquet` multi-file/directory read (D-21) where two files' Arrow schemas
+    /// disagree.
+    ///
+    /// Carries the first file, the first mismatched file, and the first differing column name
+    /// so the raised exception is directly actionable -- `from_parquet` NEVER silently
+    /// unions/best-effort-merges divergent schemas across files (T-03-08).
+    #[error("schema mismatch across Parquet files: {first_file:?} and {other_file:?} disagree on column {column:?}")]
+    ParquetSchemaMismatch {
+        first_file: String,
+        other_file: String,
+        column: String,
+    },
+
+    /// A `from_parquet` file (single, list-element, or directory-discovered) that failed to
+    /// open/parse.
+    ///
+    /// Carries the offending path and the underlying reason (e.g. an `io::Error`/
+    /// `ParquetError` message) so a missing file, non-Parquet file, or corrupt file surfaces as
+    /// a named, catchable failure naming the exact path -- never a silent skip or a generic,
+    /// unattributed error.
+    #[error("failed to read Parquet file {path:?}: {reason}")]
+    ParquetReadError { path: String, reason: String },
+
+    /// A `from_parquet` directory/list `path` argument that resolves to ZERO files (an empty
+    /// directory with no `.parquet` entries, or an empty path list), or a malformed `path`
+    /// argument shape (not a `str`/`Path`/list of `str`/`Path`).
+    ///
+    /// Same "no silent best-effort" input-validation family as `UnsupportedCodec`/
+    /// `UnsupportedFilterOperator`/`ParquetSchemaMismatch` (D-21 empty edge) -- `from_parquet`
+    /// NEVER silently returns an empty `Table` for this case.
+    #[error("{0}")]
+    InvalidParquetPathArgument(String),
+
     /// Any other conversion/runtime failure not covered by a more specific variant.
     #[error("{0}")]
     Other(String),
@@ -72,6 +105,16 @@ impl From<FlintError> for PyErr {
             // Same treatment as UnsupportedCodec (D-25): a named, catchable flint-owned exception
             // naming the offending column/operator, never a builtin exception.
             FlintError::UnsupportedFilterOperator { .. } => PyFlintError::new_err(err.to_string()),
+            // D-21: a named, catchable flint-owned exception naming both files and the
+            // mismatched column -- never a silent union/merge.
+            FlintError::ParquetSchemaMismatch { .. } => PyFlintError::new_err(err.to_string()),
+            // Same treatment as FlintError::Arrow/Other: wraps an underlying IO/parse failure
+            // rather than a caller-input-validation failure.
+            FlintError::ParquetReadError { .. } => PyValueError::new_err(err.to_string()),
+            // Same treatment as UnsupportedCodec/UnsupportedFilterOperator/ParquetSchemaMismatch:
+            // a named, catchable flint-owned exception, not a builtin ValueError -- an empty
+            // directory/list is a caller-input-validation failure, not a wrapped IO/parse error.
+            FlintError::InvalidParquetPathArgument(_) => PyFlintError::new_err(err.to_string()),
             FlintError::Arrow(_) => PyValueError::new_err(err.to_string()),
             FlintError::Other(_) => PyValueError::new_err(err.to_string()),
         }

@@ -41,14 +41,14 @@
 //! the caller's exact `columns` order after decoding.
 
 use std::fs::File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use arrow::array::{Array, ArrayRef, AsArray, BooleanArray, Float64Array, Int64Array, StringArray};
 use arrow::compute::kernels::cmp;
 use arrow::compute::{cast, concat_batches};
 use arrow::datatypes::{
-    DataType, Float32Type, Float64Type, Int16Type, Int32Type, Int64Type, Int8Type, Schema,
+    DataType, Field, Float32Type, Float64Type, Int16Type, Int32Type, Int64Type, Int8Type, Schema,
     UInt16Type, UInt32Type, UInt8Type,
 };
 use arrow::error::ArrowError;
@@ -197,6 +197,131 @@ pub fn read_parquet(
     }
 
     Ok(batch)
+}
+
+/// Errors specific to reading MULTIPLE Parquet files as one `Table` (D-21).
+///
+/// Kept separate from the plain `ParquetError` `read_parquet` uses, so the PyO3 boundary
+/// (`flint-python/src/table.rs`) can construct the precise, named
+/// `FlintError::ParquetSchemaMismatch`/`FlintError::ParquetReadError` variant directly from
+/// structured fields, without string-sniffing an underlying `ParquetError`'s message -- the same
+/// "structured info crosses the flint-core/flint-python boundary" discipline as
+/// `build_writer_properties`'s codec-only-fallible design (Plan 02).
+#[derive(Debug)]
+pub enum MultiParquetReadError {
+    /// Two files' Arrow schemas disagree. Carries the first file, the first mismatched file,
+    /// and the first differing column name (D-21: never a silent union/merge across files).
+    SchemaMismatch {
+        first_file: String,
+        other_file: String,
+        column: String,
+    },
+    /// A specific file failed to open/parse. Carries the offending path so the caller can name
+    /// it directly (a missing file, non-Parquet file, or corrupt file never surfaces as a
+    /// generic, unattributed error).
+    Read { path: String, source: ParquetError },
+}
+
+/// Read one or more Parquet files (D-21: a single file, a caller-provided list, or a
+/// directory's `.parquet` files, already resolved to `paths` by the PyO3 boundary) into ONE
+/// `RecordBatch`, applying the SAME optional column projection (D-27) and filter list
+/// (D-23/D-24, PARQ-04/PARQ-05) to every file via `read_parquet`.
+///
+/// `paths` MUST be non-empty (the PyO3 boundary rejects an empty list/directory before calling
+/// here, per D-21's empty-edge decision). A single-element `paths` behaves identically to
+/// calling `read_parquet` directly (D-21 empty/single edge).
+///
+/// BEFORE decoding each file's data, every file's RAW (unprojected, unfiltered) Arrow schema is
+/// compared against the first file's for STRICT equality (D-21 Open Question 1: strict-match
+/// required, never a silent best-effort union/merge) -- a mismatch returns
+/// `MultiParquetReadError::SchemaMismatch` naming the first file, the first mismatched file, and
+/// the first differing column, before any row is read. Matching files are read (with the
+/// caller's `columns`/`filters` applied per file, reusing `read_parquet`'s single-file logic
+/// unchanged) and concatenated via `arrow::compute::concat_batches` in the caller's file-list
+/// order (D-21 ordering edge: explicit list order as given; the PyO3 boundary sorts a
+/// directory's discovered files lexicographically before calling here).
+pub fn read_parquet_multi(
+    paths: &[PathBuf],
+    columns: Option<&[String]>,
+    filters: &[FilterExpr],
+) -> Result<RecordBatch, MultiParquetReadError> {
+    let first_path = &paths[0];
+    let first_schema = read_raw_schema(first_path).map_err(|source| MultiParquetReadError::Read {
+        path: first_path.display().to_string(),
+        source,
+    })?;
+
+    let mut batches: Vec<RecordBatch> = Vec::with_capacity(paths.len());
+    for path in paths {
+        let schema = read_raw_schema(path).map_err(|source| MultiParquetReadError::Read {
+            path: path.display().to_string(),
+            source,
+        })?;
+        if let Some(column) = first_schema_mismatch(&first_schema, &schema) {
+            return Err(MultiParquetReadError::SchemaMismatch {
+                first_file: first_path.display().to_string(),
+                other_file: path.display().to_string(),
+                column,
+            });
+        }
+
+        let batch = read_parquet(path, columns, filters).map_err(|source| MultiParquetReadError::Read {
+            path: path.display().to_string(),
+            source,
+        })?;
+        batches.push(batch);
+    }
+
+    if batches.len() == 1 {
+        return Ok(batches.into_iter().next().expect("checked len == 1 above"));
+    }
+
+    let schema = batches[0].schema();
+    concat_batches(&schema, &batches).map_err(|err| MultiParquetReadError::Read {
+        path: first_path.display().to_string(),
+        source: ParquetError::from(err),
+    })
+}
+
+/// Read a single Parquet file's own (unprojected, unfiltered) Arrow schema -- used by
+/// `read_parquet_multi`'s strict cross-file schema-equality check, independent of any
+/// projection/filter the caller may apply to the actual data read.
+fn read_raw_schema(path: &Path) -> Result<Arc<Schema>, ParquetError> {
+    let file = File::open(path)?;
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
+    Ok(builder.schema().clone())
+}
+
+/// Return the name of the first column at which two schemas disagree (by name, `DataType`, and
+/// nullability), or `None` if every field matches positionally. Deliberately narrower than
+/// `Field`'s full `PartialEq` (which also compares dictionary-ordering/metadata) -- this project
+/// cares about D-21's "the same logical column" contract, not incidental metadata differences a
+/// writer might attach.
+fn first_schema_mismatch(a: &Schema, b: &Schema) -> Option<String> {
+    let a_fields = a.fields();
+    let b_fields = b.fields();
+    let max_len = a_fields.len().max(b_fields.len());
+    for i in 0..max_len {
+        match (a_fields.get(i), b_fields.get(i)) {
+            (Some(fa), Some(fb)) => {
+                if !fields_match(fa, fb) {
+                    return Some(fa.name().clone());
+                }
+            }
+            (Some(fa), None) => return Some(fa.name().clone()),
+            (None, Some(fb)) => return Some(fb.name().clone()),
+            (None, None) => unreachable!("i < max_len guarantees at least one side has a field"),
+        }
+    }
+    None
+}
+
+/// Compare two `Field`s for D-21's "same logical column" purposes: name, `DataType`, and
+/// nullability -- NOT `Field`'s full `PartialEq` (which also compares dictionary-ordering and
+/// arbitrary metadata that can legitimately differ between two files carrying the same logical
+/// column).
+fn fields_match(a: &Field, b: &Field) -> bool {
+    a.name() == b.name() && a.data_type() == b.data_type() && a.is_nullable() == b.is_nullable()
 }
 
 /// Decide, for each row group, whether it MIGHT contain a row matching every filter in `filters`

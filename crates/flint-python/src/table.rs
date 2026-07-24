@@ -63,6 +63,91 @@ fn parse_filter_operator(column: &str, operator: &str) -> Result<Op, FlintError>
     }
 }
 
+/// Resolve `Table.from_parquet`'s `path` argument (D-21: `str`/`Path`, a directory, or a list of
+/// `str`/`Path`) into a `Vec<PathBuf>` for `flint_core::parquet_io::read_parquet_multi`.
+///
+/// Tries single-path (`str`/`pathlib.Path`, `os.PathLike`-aware) extraction FIRST -- a Python
+/// `list`/`tuple` has no `__fspath__` and is not `str`/`bytes`, so this always fails cleanly for
+/// a list/tuple and falls through to the list-extraction branch below (never misinterprets a
+/// plain string path as "a list of one-character paths").
+///
+/// - A single path that IS a directory: all `*.parquet` entries within it, sorted
+///   lexicographically by filename (D-21 ordering edge, deterministic). A directory with zero
+///   `.parquet` files raises `FlintError::Other` (D-21 empty edge) rather than silently
+///   returning an empty `Table`.
+/// - A single path that is a file: unchanged single-element-vec behavior (D-21 empty/single
+///   edge: identical to what `from_parquet` already did before this plan).
+/// - A Python list/tuple of `str`/`Path`: that list in the given order (D-21 ordering edge). An
+///   empty list raises `FlintError::Other`. A directory found INSIDE a list is rejected (kept
+///   distinct from the single-path directory-auto-discovery mode, per this plan's own
+///   discretion note) -- a non-existent path or a non-`.parquet`-extension file passed
+///   explicitly as a list element raises `FlintError::ParquetReadError` naming that path (D-21
+///   security note: never silently skip/include).
+fn resolve_parquet_paths(path_arg: &Bound<'_, PyAny>) -> PyResult<Vec<PathBuf>> {
+    if let Ok(single) = path_arg.extract::<PathBuf>() {
+        if single.is_dir() {
+            let entries = std::fs::read_dir(&single).map_err(|e| FlintError::ParquetReadError {
+                path: single.display().to_string(),
+                reason: e.to_string(),
+            })?;
+            let mut files: Vec<PathBuf> = entries
+                .filter_map(|entry| entry.ok())
+                .map(|entry| entry.path())
+                .filter(|p| p.extension().and_then(|ext| ext.to_str()) == Some("parquet"))
+                .collect();
+            files.sort();
+            if files.is_empty() {
+                return Err(FlintError::InvalidParquetPathArgument(format!(
+                    "directory {single:?} contains no .parquet files"
+                ))
+                .into());
+            }
+            return Ok(files);
+        }
+        return Ok(vec![single]);
+    }
+
+    if let Ok(list) = path_arg.extract::<Vec<PathBuf>>() {
+        if list.is_empty() {
+            return Err(FlintError::InvalidParquetPathArgument(
+                "from_parquet received an empty path list".to_string(),
+            )
+            .into());
+        }
+        for path in &list {
+            if path.is_dir() {
+                return Err(FlintError::InvalidParquetPathArgument(format!(
+                    "from_parquet path list element {path:?} is a directory; pass a directory \
+                     as the sole path argument instead of inside a list"
+                ))
+                .into());
+            }
+            if !path.exists() {
+                return Err(FlintError::ParquetReadError {
+                    path: path.display().to_string(),
+                    reason: "no such file or directory".to_string(),
+                }
+                .into());
+            }
+            let is_parquet_ext = path.extension().and_then(|ext| ext.to_str()) == Some("parquet");
+            if !is_parquet_ext {
+                return Err(FlintError::ParquetReadError {
+                    path: path.display().to_string(),
+                    reason: "expected a .parquet file extension".to_string(),
+                }
+                .into());
+            }
+        }
+        return Ok(list);
+    }
+
+    Err(FlintError::InvalidParquetPathArgument(
+        "from_parquet's path argument must be a str, pathlib.Path, or a list of str/Path"
+            .to_string(),
+    )
+    .into())
+}
+
 /// Extract a `filters=` tuple's Python value into `parquet_filter::ScalarValue`.
 ///
 /// Checked in `bool -> int -> float -> str` order: Python's `bool` is a subclass of `int`, so
@@ -237,13 +322,15 @@ impl Table {
         Ok(df.unbind())
     }
 
-    /// Read a Parquet file at `path` into a `Table` (PARQ-01, D-19/D-20), with an optional column
-    /// projection (`columns`, D-27/PARQ-05) and an optional AND-combined filter list (`filters`,
-    /// D-23/D-24/D-25, PARQ-04).
+    /// Read one or more Parquet files at `path` into a single `Table` (PARQ-01, D-19/D-20/D-21),
+    /// with an optional column projection (`columns`, D-27/PARQ-05) and an optional AND-combined
+    /// filter list (`filters`, D-23/D-24/D-25, PARQ-04).
     ///
-    /// Accepts a `str` or `pathlib.Path` (D-20) -- extracting directly as `PathBuf` uses PyO3's
-    /// own `os.PathLike`-aware conversion, so any other argument type fails extraction with a
-    /// clear `TypeError` rather than being silently coerced.
+    /// `path` accepts a `str`/`pathlib.Path` (a single file OR a directory, D-20/D-21), or a
+    /// Python list of `str`/`Path` (D-21) -- resolved to a `Vec<PathBuf>` by
+    /// `resolve_parquet_paths` (see its own doc comment for the full directory/list/empty-edge
+    /// contract). Any other argument type fails with a clear `FlintError`/`TypeError` rather than
+    /// being silently coerced.
     ///
     /// `filters` is a flat list of `(column: str, operator: str, value)` 3-tuples (D-23) --
     /// multiple tuples combine with AND only (D-24, no OR/nested-list support). Each tuple is
@@ -251,20 +338,22 @@ impl Table {
     /// mapped via `parse_filter_operator`'s exhaustive match (an unrecognized operator raises
     /// `FlintError::UnsupportedFilterOperator` naming the column + operator, D-25 -- never a
     /// silently skipped tuple), and the value is extracted via `parse_filter_value`. The resulting
-    /// `Vec<FilterExpr>` is built exactly once and passed to `read_parquet`, which is the single
-    /// place that consumes it for BOTH the row-group skip decision and the row-level filter
-    /// (single-source-of-truth; this classmethod never re-derives or re-parses it).
+    /// `Vec<FilterExpr>` is built exactly once and passed to `read_parquet_multi`, which is the
+    /// single place that consumes it (via `read_parquet` per file) for BOTH the row-group skip
+    /// decision and the row-level filter (single-source-of-truth; this classmethod never
+    /// re-derives or re-parses it).
     ///
     /// Delegates the actual file IO entirely to the pyo3-free `flint_core::parquet_io::
-    /// read_parquet` -- no `parquet`-crate call happens in this crate. `column_reports:
-    /// Vec::new()` (mirroring `from_pytable`'s empty-report convention) since a Parquet read did
-    /// not go through `from_pandas`'s per-column plan.
+    /// read_parquet_multi` (D-21: strict cross-file schema-match, never a silent union/merge) --
+    /// no `parquet`-crate call happens in this crate. `column_reports: Vec::new()` (mirroring
+    /// `from_pytable`'s empty-report convention) since a Parquet read did not go through
+    /// `from_pandas`'s per-column plan.
     #[classmethod]
     #[pyo3(signature = (path, columns=None, filters=None))]
     fn from_parquet<'py>(
         _cls: &Bound<'py, PyType>,
         py: Python<'py>,
-        path: PathBuf,
+        path: Bound<'py, PyAny>,
         columns: Option<Vec<String>>,
         filters: Option<Vec<(String, String, Bound<'py, PyAny>)>>,
     ) -> PyResult<Self> {
@@ -280,10 +369,30 @@ impl Table {
             None => Vec::new(),
         };
 
-        let batch = flint_core::parquet_io::read_parquet(&path, columns.as_deref(), &filter_exprs)
-            .map_err(|err| {
-                FlintError::Other(format!("failed to read Parquet file {path:?}: {err}"))
-            })?;
+        let paths = resolve_parquet_paths(&path)?;
+
+        let batch = flint_core::parquet_io::read_parquet_multi(
+            &paths,
+            columns.as_deref(),
+            &filter_exprs,
+        )
+        .map_err(|err| match err {
+            flint_core::parquet_io::MultiParquetReadError::SchemaMismatch {
+                first_file,
+                other_file,
+                column,
+            } => FlintError::ParquetSchemaMismatch {
+                first_file,
+                other_file,
+                column,
+            },
+            flint_core::parquet_io::MultiParquetReadError::Read { path, source } => {
+                FlintError::ParquetReadError {
+                    path,
+                    reason: source.to_string(),
+                }
+            }
+        })?;
         let schema = batch.schema();
         let py_table = PyTable::try_new(vec![batch], schema)?;
 
