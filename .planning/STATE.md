@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 03
 current_phase_name: parquet-io
 status: executing
-stopped_at: Completed 03-02-PLAN.md
-last_updated: "2026-07-23T13:06:07.501Z"
+stopped_at: Completed 03-03-PLAN.md
+last_updated: "2026-07-24T05:02:56.728Z"
 last_activity: 2026-07-23
 last_activity_desc: Phase 03 execution started
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 14
-  completed_plans: 12
+  completed_plans: 13
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-07-15)
 ## Current Position
 
 Phase: 03 (parquet-io) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-07-23 — Phase 03 execution started
 
-Progress: [█████████░] 86%
+Progress: [█████████░] 93%
 
 ## Performance Metrics
 
@@ -66,6 +66,7 @@ Progress: [█████████░] 86%
 | Phase quick P260715-smf | 12min | 2 tasks | 2 files |
 | Phase 03 P01 | 40min | 3 tasks | 6 files |
 | Phase 03 P02 | 10min | 2 tasks | 4 files |
+| Phase 03-parquet-io P03 | resumed | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -98,6 +99,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 03 P01]: flint-core::parquet_io returns parquet::errors::ParquetError (not FlintError) since flint-core cannot depend on flint-python's pyo3-coupled error type; mapped to FlintError::Other at the from_parquet/to_parquet PyO3 boundary
 - [Phase ?]: [Phase 03 P02]: Resolved a plan/architecture conflict -- build_writer_properties stays in flint-core (pyo3-free) returning Result<WriterProperties, ParquetError> rather than the plan-specified Result<_, FlintError> (which would require a circular flint-core -> flint-python dependency); table.rs maps any Err directly to FlintError::UnsupportedCodec since codec is the function's sole fallible input once row_group_size==0 is pre-guarded
 - [Phase ?]: [Phase 03 P02]: Confirmed set_max_row_group_row_count (not deprecated set_max_row_group_size, not byte-based set_max_row_group_bytes) as the correct row-count row-group setter for pinned parquet 59.1.0 by reading the vendored crate source directly
+- [Phase ?]: ScalarValue is a plain, arrow-crate-free enum (Int64/Float64/Bool/Utf8); Int64/Float64 cross-type comparisons widen to f64; Utf8 column stats are never trusted for row-group pruning (truncation risk) though still filtered exactly via RowFilter; filter-value extraction checks bool before int before float before str.
+- [Phase ?]: Resumed a mid-task interruption (prior executor terminated by a provider session/usage-limit error): reviewed uncommitted parquet_io.rs/error.rs work as already correct, completed only the missing table.rs wiring gap.
 
 ### Pending Todos
 
@@ -128,6 +131,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-23T13:06:07.494Z
-Stopped at: Completed 03-02-PLAN.md
+Last session: 2026-07-24T05:02:56.722Z
+Stopped at: Completed 03-03-PLAN.md
 Resume file: None

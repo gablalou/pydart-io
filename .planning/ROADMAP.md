@@ -101,7 +101,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Written Parquet files carry row-group statistics that enable predicate pushdown, and the user can apply column projection plus predicate pushdown when reading
   4. A Parquet round-trip preserves logical types correctly, including tz-aware timestamps and categorical/dictionary encoding
 
-**Plans**: 2/4 plans executed
+**Plans**: 3/4 plans executed
 
 **Wave 1**
 
@@ -113,7 +113,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Wave 3** *(blocked on Waves 1-2)*
 
-- [ ] 03-03-PLAN.md — Predicate pushdown (row-group skip + exact row filter) + column projection (PARQ-04, PARQ-05)
+- [x] 03-03-PLAN.md — Predicate pushdown (row-group skip + exact row filter) + column projection (PARQ-04, PARQ-05)
 
 **Wave 4** *(blocked on Waves 1-3)*
 
@@ -143,5 +143,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. Core Zero-Copy Round-Trip & Interop | 5/5 | Complete    | 2026-07-14 |
 | 2. Full Dtype & Structural Coverage | 5/5 | Complete    | 2026-07-23 |
-| 3. Parquet IO | 2/4 | In Progress|  |
+| 3. Parquet IO | 3/4 | In Progress|  |
 | 4. Benchmark & Release Readiness | 0/TBD | Not started | - |
