@@ -49,7 +49,7 @@ use arrow::compute::kernels::cmp;
 use arrow::compute::{cast, concat_batches};
 use arrow::datatypes::{
     DataType, Field, Float32Type, Float64Type, Int16Type, Int32Type, Int64Type, Int8Type, Schema,
-    UInt16Type, UInt32Type, UInt8Type,
+    UInt16Type, UInt32Type, UInt64Type, UInt8Type,
 };
 use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
@@ -472,11 +472,13 @@ fn scalar_value_to_array(value: &ScalarValue) -> ArrayRef {
 /// Extract a `ScalarValue` from a `StatisticsConverter`-produced min/max `ArrayRef` at
 /// `row_group_idx`. Returns `None` (conservatively "no stat available") when the value is null
 /// (the row group's stats are absent -- `StatisticsConverter`'s own documented null-means-unknown
-/// convention) OR when the physical type is one this project does not trust for pruning: `Utf8`/
+/// convention), when the physical type is one this project does not trust for pruning (`Utf8`/
 /// `LargeUtf8` min/max statistics in Parquet can be TRUNCATED by the writer, which could cause
 /// `could_match_range` to over-prune (silently drop matching rows, the D-26-forbidden direction)
 /// -- string columns are still filtered exactly via `evaluate_predicate`'s `RowFilter`, they
-/// simply never benefit from the row-group-skip optimization.
+/// simply never benefit from the row-group-skip optimization), or when a `UInt64` value does not
+/// fit losslessly into `ScalarValue::Int64` (values > `i64::MAX`; same conservative fallback, never
+/// a silently-wrapped/truncated value).
 fn scalar_from_array(array: &dyn Array, idx: usize) -> Option<ScalarValue> {
     if array.is_null(idx) {
         return None;
@@ -489,6 +491,13 @@ fn scalar_from_array(array: &dyn Array, idx: usize) -> Option<ScalarValue> {
         DataType::UInt8 => Some(ScalarValue::Int64(array.as_primitive::<UInt8Type>().value(idx) as i64)),
         DataType::UInt16 => Some(ScalarValue::Int64(array.as_primitive::<UInt16Type>().value(idx) as i64)),
         DataType::UInt32 => Some(ScalarValue::Int64(array.as_primitive::<UInt32Type>().value(idx) as i64)),
+        // `u64 -> i64` can itself overflow for values > i64::MAX; rather than truncating (which
+        // could make `could_match_range` see a wrong, silently-wrapped value), fall back to the
+        // same conservative "no stat available" `None` the Utf8/LargeUtf8 arm below uses whenever
+        // the value doesn't fit losslessly in an `i64`.
+        DataType::UInt64 => {
+            i64::try_from(array.as_primitive::<UInt64Type>().value(idx)).ok().map(ScalarValue::Int64)
+        }
         DataType::Float32 => Some(ScalarValue::Float64(array.as_primitive::<Float32Type>().value(idx) as f64)),
         DataType::Float64 => Some(ScalarValue::Float64(array.as_primitive::<Float64Type>().value(idx))),
         DataType::Boolean => Some(ScalarValue::Bool(array.as_boolean().value(idx))),
