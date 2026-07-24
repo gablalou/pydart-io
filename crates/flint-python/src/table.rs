@@ -91,9 +91,14 @@ fn resolve_parquet_paths(path_arg: &Bound<'_, PyAny>) -> PyResult<Vec<PathBuf>> 
                 reason: e.to_string(),
             })?;
             let mut files: Vec<PathBuf> = entries
-                .filter_map(|entry| entry.ok())
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| FlintError::ParquetReadError {
+                    path: single.display().to_string(),
+                    reason: e.to_string(),
+                })?
+                .into_iter()
                 .map(|entry| entry.path())
-                .filter(|p| p.extension().and_then(|ext| ext.to_str()) == Some("parquet"))
+                .filter(|p| p.is_file() && p.extension().and_then(|ext| ext.to_str()) == Some("parquet"))
                 .collect();
             files.sort();
             if files.is_empty() {
