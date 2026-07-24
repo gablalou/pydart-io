@@ -382,6 +382,25 @@ fn build_row_filter(parquet_schema: &SchemaDescriptor, filters: &[FilterExpr]) -
     RowFilter::new(predicates)
 }
 
+/// Return the inclusive min/max representable value of an Arrow integer `DataType`, widened to
+/// `i128` so every supported integer type's bounds (including `UInt64`, whose max exceeds
+/// `i64::MAX`) can be compared against an `Int64` filter literal without overflow. `None` for any
+/// non-integer `DataType` -- float/bool/string columns aren't subject to the
+/// cast-silently-produces-null overflow problem `evaluate_predicate` guards against below.
+fn integer_bounds(data_type: &DataType) -> Option<(i128, i128)> {
+    match data_type {
+        DataType::Int8 => Some((i8::MIN as i128, i8::MAX as i128)),
+        DataType::Int16 => Some((i16::MIN as i128, i16::MAX as i128)),
+        DataType::Int32 => Some((i32::MIN as i128, i32::MAX as i128)),
+        DataType::Int64 => Some((i64::MIN as i128, i64::MAX as i128)),
+        DataType::UInt8 => Some((u8::MIN as i128, u8::MAX as i128)),
+        DataType::UInt16 => Some((u16::MIN as i128, u16::MAX as i128)),
+        DataType::UInt32 => Some((u32::MIN as i128, u32::MAX as i128)),
+        DataType::UInt64 => Some((u64::MIN as i128, u64::MAX as i128)),
+        _ => None,
+    }
+}
+
 /// Evaluate one `FilterExpr`'s comparison against a single-column `RecordBatch` (the column
 /// selected by `ArrowPredicateFn`'s own `ProjectionMask`, always at index 0).
 ///
@@ -389,8 +408,37 @@ fn build_row_filter(parquet_schema: &SchemaDescriptor, filters: &[FilterExpr]) -
 /// column's actual `DataType` before comparing -- this makes the comparison correct regardless of
 /// the exact numeric width (e.g. a Python `int` filter literal against an `Int32`/`Float64`
 /// column) without this project having to hand-write a comparison per Arrow physical type.
+///
+/// D-26 guard: `arrow::compute::cast`'s default `safe: true` semantics silently turn an
+/// out-of-range integer literal into a null scalar (e.g. `Int64(300)` cast down to `Int8`, whose
+/// range is -128..127), and every comparison kernel below treats a null literal as "no match" for
+/// EVERY row -- correct by coincidence for `Eq`, but silently WRONG (drops matching rows) for
+/// every other operator (`col < 300` on an `Int8` column must match every row, not zero). Before
+/// casting, resolve the provably correct constant result whenever an `Int64` literal does not fit
+/// the column's integer range, rather than trusting the cast's null-on-overflow behavior.
 fn evaluate_predicate(batch: &RecordBatch, op: Op, value: &ScalarValue) -> Result<BooleanArray, ArrowError> {
     let column = batch.column(0);
+
+    if let ScalarValue::Int64(v) = value {
+        if let Some((min, max)) = integer_bounds(column.data_type()) {
+            let v = *v as i128;
+            if v > max || v < min {
+                // Non-null rows all provably satisfy (or all provably fail) `op` against an
+                // out-of-range literal; null rows never match any comparison (same convention as
+                // the normal cast-and-compare path below).
+                let all_rows_match = if v > max {
+                    matches!(op, Op::Ne | Op::Lt | Op::Le)
+                } else {
+                    matches!(op, Op::Ne | Op::Gt | Op::Ge)
+                };
+                let result: BooleanArray = (0..column.len())
+                    .map(|i| !column.is_null(i) && all_rows_match)
+                    .collect();
+                return Ok(result);
+            }
+        }
+    }
+
     let literal = scalar_value_to_array(value);
     let casted = cast(&literal, column.data_type())?;
     let scalar = arrow::array::Scalar::new(casted);
