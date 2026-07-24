@@ -228,7 +228,9 @@ pub enum MultiParquetReadError {
 /// (D-23/D-24, PARQ-04/PARQ-05) to every file via `read_parquet`.
 ///
 /// `paths` MUST be non-empty (the PyO3 boundary rejects an empty list/directory before calling
-/// here, per D-21's empty-edge decision). A single-element `paths` behaves identically to
+/// here, per D-21's empty-edge decision) -- this function additionally defends its own precondition
+/// with an `Err` (rather than an unchecked index) so a future/other caller of this `pub` API can
+/// never trigger a panic on an empty slice. A single-element `paths` behaves identically to
 /// calling `read_parquet` directly (D-21 empty/single edge).
 ///
 /// BEFORE decoding each file's data, every file's RAW (unprojected, unfiltered) Arrow schema is
@@ -245,7 +247,10 @@ pub fn read_parquet_multi(
     columns: Option<&[String]>,
     filters: &[FilterExpr],
 ) -> Result<RecordBatch, MultiParquetReadError> {
-    let first_path = &paths[0];
+    let first_path = paths.first().ok_or_else(|| MultiParquetReadError::Read {
+        path: String::new(),
+        source: ParquetError::General("read_parquet_multi called with an empty path list".to_string()),
+    })?;
     let first_schema = read_raw_schema(first_path).map_err(|source| MultiParquetReadError::Read {
         path: first_path.display().to_string(),
         source,
