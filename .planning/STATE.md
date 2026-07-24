@@ -20,10 +20,10 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-07-15)
+See: .planning/PROJECT.md (updated 2026-07-24)
 
 **Core value:** Converting a pandas DataFrame to/from an Arrow Table should be zero-copy (or as close to it as physically possible) and measurably faster than pyarrow — this must work and must be provably faster, or the project has no reason to exist.
-**Current focus:** Phase 03 — parquet-io
+**Current focus:** Phase 4 — Benchmark & Release Readiness
 
 ## Current Position
 
@@ -106,6 +106,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 03 P04]: WR-01/D-31 fixed -- build_field sources nullability from declared source pandas schema, not observed null_count(); resolves the 02-REVIEW.md concat_tables ArrowInvalid failure
 - [Phase ?]: [Phase 03 P04]: D-21 multi-file/directory Parquet read delivered with strict cross-file schema-match (ParquetSchemaMismatch on divergence, never silent union) and deterministic lexicographic directory ordering
 - [Phase ?]: [Phase 03 P04]: CHECKPOINT (user-approved, Option A) -- categorical/dictionary Parquet fidelity tests scoped to what arrow-rs's DictEncoder actually guarantees (DataType::Dictionary, dict_is_ordered, per-row values); exact .cat.categories order and unused-category retention are NOT guaranteed (arrow-rs-vs-pyarrow divergence, no WriterProperties fix in parquet 59.1.0) -- documented as accepted risk, real correctness concern only for ordered categoricals
+- [Phase 03 code review]: CR-01 (Critical, fixed df26820) -- evaluate_predicate's row-level filter relied on arrow::compute::cast's null-on-overflow semantics with no range check, silently returning wrong row sets for out-of-range integer filter literals against narrower integer columns (violated D-26). Fixed via an integer_bounds pre-cast range-check helper; independently re-verified live by the phase verifier. Also fixed same pass: WR-01 (unchecked paths[0] panic), WR-02 (silently swallowed read_dir errors + missing is_file() filter), WR-03 (missing UInt64 stats arm), WR-04 (missing dict_is_ordered in cross-file schema-match).
+- [Phase 03 secure-phase]: Full STRIDE register across all 4 plans (10 threats: T-03-01 through T-03-09 plus T-03-SC/T-03-02) verified closed -- threats_open: 0, ASVS level 1, see 03-SECURITY.md. Three code-review-fixed bugs (T-03-04, T-03-07, T-03-08) mapped directly onto the CR-01/WR-02/WR-04 findings above.
 
 ### Pending Todos
 
@@ -116,8 +118,8 @@ None yet.
 - ~~Phase 2 (carried forward from Phase 1 verification override): CONV-08 DIAG-01/DIAG-02 multi-chunk diagnostics honesty gap~~ -- **Resolved** in Phase 2 Plan 05 (see 02-VERIFICATION.md and 02-05-SUMMARY.md).
 - ~~Phase 3 (from 02-REVIEW.md WR-01, demonstrated/reproducible): `build_field` in `crates/flint-python/src/pandas.rs` derives Arrow field nullability from the current batch's observed `null_count() > 0` rather than the source pandas dtype's declared nullability.~~ -- **Resolved** in Phase 3 Plan 04 (see 03-04-SUMMARY.md): `build_field` now sources nullability from the declared source schema; `concat_tables` reproduction test passes.
 - Phase 3 (from 02-REVIEW.md WR-02, structurally real but not reproduced under pinned config): the zero-copy numpy buffer borrow (`borrow_numpy_numeric_column`/`NumpyBufferOwner`) has no independent immutability guarantee — it relies entirely on pandas' Copy-on-Write to prevent post-borrow mutation from corrupting the Arrow buffer. Did not reproduce under pinned pandas 3.0.3 (CoW blocked all three tried mutation paths), but CLAUDE.md claims `pandas >= 2.2` support with no runtime floor pinned in pyproject.toml, and CoW is off by default pre-3.0 — a latent gap on nominally-supported configurations.
-- Phase 3 (research-flagged): categorical/dictionary Parquet round-trip edge cases and tz-aware timestamp handling warrant verification against current pyarrow issues (#35259, #1688) at plan time.
-- Phase 3 (research-flagged): confirm pandas ArrowDtype import-side support status (pandas 3.0.x) before finalizing pandas-interop reverse direction — may affect Phase 2 design already, verify at Phase 2 plan time too.
+- ~~Phase 3 (research-flagged): categorical/dictionary Parquet round-trip edge cases and tz-aware timestamp handling warrant verification against current pyarrow issues (#35259, #1688) at plan time.~~ -- **Addressed** in Phase 3 Plan 04 (`test_parquet_fidelity.py`): tz-aware round-trip verified exact (zone string + instant + ns precision); categorical round-trip verified for `DataType::Dictionary`/`dict_is_ordered`/per-row values, with the `.cat.categories`-order divergence from pyarrow documented as an accepted gap (T-03-09), not left unverified.
+- ~~Phase 3 (research-flagged): confirm pandas ArrowDtype import-side support status (pandas 3.0.x) before finalizing pandas-interop reverse direction — may affect Phase 2 design already, verify at Phase 2 plan time too.~~ -- Moot: Phases 2 and 3 both shipped and verified without this surfacing as a blocker.
 - Phase 4 (research-flagged): benchmarking methodology (criterion/pytest-benchmark/codspeed) and manylinux/glibc floor are MEDIUM-confidence, task-derived recommendations — validate current best practice at plan time.
 - Phase 3 (accepted, documented -- see 03-04-SUMMARY.md Known Gap): arrow-rs's ArrowWriter/DictEncoder reassigns dictionary keys in first-occurrence-during-encoding order and drops unused categories on Parquet write, so a categorical's .cat.categories order and unused categories do NOT survive a Parquet round-trip (values and dict_is_ordered DO survive correctly). Cosmetic for unordered categoricals; a real correctness concern for ordered categoricals since the < relationship between categories can silently change. No WriterProperties fix exists in parquet 59.1.0 (arrow-rs-only constraint); pyarrow does not share this limitation. Surface in Phase 4 release docs if categorical fidelity is a headline interop claim.
 
@@ -137,6 +139,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-24T05:50:28.540Z
-Stopped at: Completed 03-04-PLAN.md
+Last session: 2026-07-24
+Stopped at: Phase 3 complete, ready to plan Phase 4
 Resume file: None
