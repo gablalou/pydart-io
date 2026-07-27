@@ -1,4 +1,4 @@
-//! `flint-core`: pure-Rust in-memory columnar core for Flint.
+//! `pydart-core`: pure-Rust in-memory columnar core for pydart.
 //!
 //! This crate has **no** dependency on `pyo3`/`pyo3-arrow` (see SKELETON.md's Architectural
 //! Decisions). It exists so the conversion/allocation logic can be tested in isolation, without a

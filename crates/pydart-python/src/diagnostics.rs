@@ -1,7 +1,7 @@
 //! Strict-mode (DIAG-01, D-03) and `copy_report()` (DIAG-02, D-04) diagnostics surface.
 //!
 //! Both features consume the SAME per-column `ColumnConversionRecord`s produced by
-//! `crate::pandas::from_pandas` (itself driven by `flint_core::pandas_plan::plan_column`, the one
+//! `crate::pandas::from_pandas` (itself driven by `pydart_core::pandas_plan::plan_column`, the one
 //! decision matrix) -- neither re-derives the copy-vs-borrow decision, so they can never silently
 //! disagree (T-01-05 / RESEARCH.md Pitfall 2 / apache/arrow#39194).
 
@@ -11,20 +11,20 @@ use pyo3::prelude::*;
 
 use crate::pandas::ColumnConversionRecord;
 
-// Rust identifiers are prefixed `Py*` to avoid colliding with `crate::error::FlintError` (the
+// Rust identifiers are prefixed `Py*` to avoid colliding with `crate::error::PydartError` (the
 // internal thiserror enum used for generic conversion errors) -- the Python-visible class names
-// ("FlintError"/"ZeroCopyRequiredError", registered in `lib.rs`) are unaffected by this.
+// ("PydartError"/"ZeroCopyRequiredError", registered in `lib.rs`) are unaffected by this.
 create_exception!(
-    _flint,
-    PyFlintError,
+    _pydart,
+    PyPydartError,
     PyException,
-    "Base class for all flint-raised errors."
+    "Base class for all pydart-raised errors."
 );
 
 create_exception!(
-    _flint,
+    _pydart,
     PyZeroCopyRequiredError,
-    PyFlintError,
+    PyPydartError,
     "Raised in strict zero-copy mode (`from_pandas(df, strict=True)`) when a column would \
      require a copy (D-03)."
 );
@@ -33,7 +33,7 @@ create_exception!(
 ///
 /// Takes the FULL per-column plan (`records`, already computed by `from_pandas` for every
 /// column) and decides: if ANY column's plan is `RequiresCopy`, raise
-/// `flint.ZeroCopyRequiredError` naming the first offending column and dtype, with the reason a
+/// `pydart.ZeroCopyRequiredError` naming the first offending column and dtype, with the reason a
 /// copy was required. This is never a whole-table try/catch around the conversion itself
 /// (RESEARCH.md Pitfall 2 / apache/arrow#39194) -- the decision is read directly off the explicit
 /// per-column plan.
@@ -51,15 +51,15 @@ pub fn check_strict(records: &[ColumnConversionRecord]) -> PyResult<()> {
     Ok(())
 }
 
-/// Build the `list[flint.ColumnCopyStatus]` returned by `Table.copy_report()` (D-04, DIAG-02),
+/// Build the `list[pydart.ColumnCopyStatus]` returned by `Table.copy_report()` (D-04, DIAG-02),
 /// from the SAME per-column records `from_pandas` produced when the `Table` was built -- this
 /// reflects the actual conversion that occurred, not a re-derived (possibly-diverging) decision.
 pub fn build_copy_report(
     py: Python<'_>,
     records: &[ColumnConversionRecord],
 ) -> PyResult<Vec<Py<PyAny>>> {
-    let flint = py.import("flint")?;
-    let status_type = flint.getattr("ColumnCopyStatus")?;
+    let pydart = py.import("pydart")?;
+    let status_type = pydart.getattr("ColumnCopyStatus")?;
 
     records
         .iter()

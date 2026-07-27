@@ -13,7 +13,7 @@
 //!
 //! Self-contained: constructs arrays directly via arrow-rs 59.1.0 + parquet 59.1.0 APIs, writing
 //! to and reading from a `tempfile`-free in-process temp file (`std::env::temp_dir()`), with no
-//! dependency on any flint classification/routing code.
+//! dependency on any pydart classification/routing code.
 
 use std::fs::File;
 use std::sync::Arc;
@@ -61,7 +61,7 @@ fn dictionary_and_tz_timestamp_survive_default_parquet_round_trip() {
     // Do NOT call ArrowWriterOptions::with_skip_arrow_metadata() -- the default embeds the full
     // Arrow schema (ARROW:schema key), which is the mechanism this gate is verifying.
     let path = std::env::temp_dir().join(format!(
-        "flint_a6_dictionary_tz_roundtrip_{}.parquet",
+        "pydart_a6_dictionary_tz_roundtrip_{}.parquet",
         std::process::id()
     ));
     {

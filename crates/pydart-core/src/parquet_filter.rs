@@ -1,17 +1,17 @@
 //! Single source-of-truth Parquet filter-comparison logic (PARQ-04/PARQ-05, D-23..D-27).
 //!
 //! `could_match_range` is the ONE function consumed by BOTH the row-group-level skip decision
-//! (`flint_core::parquet_io::surviving_row_groups`) and the row-level `ArrowPredicateFn` builder
-//! (`flint_core::parquet_io`'s `RowFilter` construction) -- both are built from the SAME parsed
-//! `Vec<FilterExpr>` once per `from_parquet` call in `flint-python/src/table.rs`, never re-derived
+//! (`pydart_core::parquet_io::surviving_row_groups`) and the row-level `ArrowPredicateFn` builder
+//! (`pydart_core::parquet_io`'s `RowFilter` construction) -- both are built from the SAME parsed
+//! `Vec<FilterExpr>` once per `from_parquet` call in `pydart-python/src/table.rs`, never re-derived
 //! (RESEARCH.md Anti-Patterns; `pandas_plan.rs` single-decision-point precedent).
 //!
-//! This module has no `pyo3`/`pyo3-arrow` dependency (see `flint-core`'s crate-level doc comment)
+//! This module has no `pyo3`/`pyo3-arrow` dependency (see `pydart-core`'s crate-level doc comment)
 //! so the comparison matrix itself can be unit-tested without a Python interpreter attached. It
 //! also has no `arrow`/`parquet`-crate dependency in its public surface -- `ScalarValue` is a
 //! plain, small value representation (`i64`/`f64`/`bool`/`String`) so `could_match_range` can be
 //! tested with zero Arrow array construction. Extracting a `ScalarValue` from a real Arrow
-//! statistics array is `flint_core::parquet_io`'s job, not this module's.
+//! statistics array is `pydart_core::parquet_io`'s job, not this module's.
 //!
 //! ## The six-operator range-comparison contract (D-25)
 //!
@@ -46,7 +46,7 @@ pub enum Op {
     Ge,
 }
 
-/// A filter literal's value, parsed at the PyO3 boundary (`flint-python/src/table.rs`) from a
+/// A filter literal's value, parsed at the PyO3 boundary (`pydart-python/src/table.rs`) from a
 /// Python `int`/`float`/`bool`/`str`. Deliberately a plain, `arrow`-crate-free representation so
 /// `could_match_range` is unit-testable with no Arrow array construction.
 #[derive(Debug, Clone, PartialEq)]
@@ -105,7 +105,7 @@ fn eq(a: &ScalarValue, b: &ScalarValue) -> bool {
 ///
 /// `min`/`max` are `None` when the row group's statistics for this column are absent (e.g. an
 /// all-null row group, or a physical type this project's statistics extraction does not trust,
-/// such as a possibly-truncated string min/max -- see `flint_core::parquet_io::scalar_from_array`).
+/// such as a possibly-truncated string min/max -- see `pydart_core::parquet_io::scalar_from_array`).
 /// ANY operator conservatively returns `true` (keep) when either bound is missing -- never skip on
 /// absent stats (T-03-04).
 pub fn could_match_range(

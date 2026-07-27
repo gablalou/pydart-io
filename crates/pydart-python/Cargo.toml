@@ -1,11 +1,11 @@
 [package]
-name = "flint-python"
+name = "pydart-python"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
 [lib]
-name = "_flint"
+name = "_pydart"
 crate-type = ["cdylib"]
 
 [dependencies]
@@ -14,4 +14,4 @@ pyo3-arrow = "0.19.0"
 arrow = "59.1.0"
 numpy = "0.29.0"
 thiserror = "2"
-flint-core = { path = "../flint-core" }
+pydart-core = { path = "../pydart-core" }

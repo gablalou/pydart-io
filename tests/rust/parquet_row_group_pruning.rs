@@ -7,7 +7,7 @@
 //! correctness (which `parquet_filter::could_match_range`'s own unit tests already cover in
 //! isolation, without needing a real Parquet file).
 //!
-//! Task 2 upgrade: this probe now calls the REAL `flint_core::parquet_io::surviving_row_groups`
+//! Task 2 upgrade: this probe now calls the REAL `pydart_core::parquet_io::surviving_row_groups`
 //! directly (rather than duplicating its skip-decision loop against `could_match_range`, as the
 //! Task 1 stub version of this file did) -- per 03-03-PLAN.md's explicit instruction that "the
 //! committed end state must call the real surviving_row_groups."
@@ -24,8 +24,8 @@ use parquet::arrow::ArrowWriter;
 use parquet::file::properties::{EnabledStatistics, WriterProperties};
 use parquet::schema::types::ColumnPath;
 
-use flint_core::parquet_filter::{FilterExpr, Op, ScalarValue};
-use flint_core::parquet_io::surviving_row_groups;
+use pydart_core::parquet_filter::{FilterExpr, Op, ScalarValue};
+use pydart_core::parquet_io::surviving_row_groups;
 
 static FIXTURE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -36,7 +36,7 @@ fn write_three_row_group_fixture() -> PathBuf {
     let n = FIXTURE_COUNTER.fetch_add(1, Ordering::SeqCst);
     let mut path = std::env::temp_dir();
     path.push(format!(
-        "flint_parquet_row_group_pruning_{}_{}.parquet",
+        "pydart_parquet_row_group_pruning_{}_{}.parquet",
         std::process::id(),
         n
     ));
@@ -70,7 +70,7 @@ fn write_three_row_group_fixture() -> PathBuf {
     path
 }
 
-/// Calls the REAL `flint_core::parquet_io::surviving_row_groups` against the fixture's own
+/// Calls the REAL `pydart_core::parquet_io::surviving_row_groups` against the fixture's own
 /// `ParquetMetaData`/schemas for a single `FilterExpr` -- this is the actual PARQ-04
 /// skip-engagement assertion (Task 2), not a re-derived stand-in.
 fn surviving_for(path: &PathBuf, column: &str, op: Op, value: ScalarValue) -> Vec<usize> {

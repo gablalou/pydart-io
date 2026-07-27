@@ -1,11 +1,11 @@
 [package]
-name = "flint-core"
+name = "pydart-core"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
 [lib]
-name = "flint_core"
+name = "pydart_core"
 crate-type = ["rlib"]
 
 [dependencies]
@@ -17,7 +17,7 @@ allocation-counter = "0.8"
 
 # Plan 03's D-06b zero-copy allocation-counting proof lives at the repo-root `tests/rust/` path
 # (locked by 01-PATTERNS.md / 01-03-PLAN.md), not this crate's own `tests/` directory -- an
-# explicit `[[test]]` entry with `path` is required for `cargo test -p flint-core --test
+# explicit `[[test]]` entry with `path` is required for `cargo test -p pydart-core --test
 # zero_copy_alloc` to find it there.
 [[test]]
 name = "zero_copy_alloc"

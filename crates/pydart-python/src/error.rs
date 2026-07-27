@@ -1,8 +1,8 @@
-//! Centralized error boundary: one Rust error enum, one `impl From<FlintError> for PyErr`.
+//! Centralized error boundary: one Rust error enum, one `impl From<PydartError> for PyErr`.
 //!
 //! Per RESEARCH.md's "Don't Hand-Roll" table and 01-PATTERNS.md's "Shared Patterns" section, Rust
 //! errors are never converted to `PyErr` ad hoc scattered across conversion code — every Rust
-//! error in this crate flows through `FlintError` and this single `From` impl. This is what makes
+//! error in this crate flows through `PydartError` and this single `From` impl. This is what makes
 //! D-03's "clear exception naming the offending column/dtype" achievable consistently, and gives
 //! later plans (strict mode, diagnostics) one place to extend.
 
@@ -10,11 +10,11 @@ use pyo3::exceptions::{PyNotImplementedError, PyValueError};
 use pyo3::PyErr;
 use thiserror::Error;
 
-use crate::diagnostics::PyFlintError;
+use crate::diagnostics::PyPydartError;
 
-/// All errors raised by the Rust side of the `flint` extension.
+/// All errors raised by the Rust side of the `pydart` extension.
 #[derive(Debug, Error)]
-pub enum FlintError {
+pub enum PydartError {
     /// A feature that exists in the public API surface but is not yet implemented.
     #[error("{0} is not yet implemented")]
     NotImplemented(String),
@@ -90,33 +90,33 @@ pub enum FlintError {
     Other(String),
 }
 
-impl From<FlintError> for PyErr {
-    fn from(err: FlintError) -> PyErr {
+impl From<PydartError> for PyErr {
+    fn from(err: PydartError) -> PyErr {
         match &err {
-            FlintError::NotImplemented(_) => PyNotImplementedError::new_err(err.to_string()),
-            // `flint.FlintError` (not a builtin `TypeError`) so callers get an honest, catchable
-            // `flint`-owned exception naming the offending column/dtype (D-08 / RESEARCH.md
+            PydartError::NotImplemented(_) => PyNotImplementedError::new_err(err.to_string()),
+            // `pydart.PydartError` (not a builtin `TypeError`) so callers get an honest, catchable
+            // `pydart`-owned exception naming the offending column/dtype (D-08 / RESEARCH.md
             // Pitfall 1) instead of relying on builtin exception hierarchy semantics.
-            FlintError::UnsupportedColumn { .. } => PyFlintError::new_err(err.to_string()),
-            // Same treatment as `UnsupportedColumn` (D-29): a named, catchable `flint`-owned
+            PydartError::UnsupportedColumn { .. } => PyPydartError::new_err(err.to_string()),
+            // Same treatment as `UnsupportedColumn` (D-29): a named, catchable `pydart`-owned
             // exception, not a builtin `ValueError` — a typo'd codec string is a user-facing
             // input-validation failure, not an internal conversion error.
-            FlintError::UnsupportedCodec(_) => PyFlintError::new_err(err.to_string()),
-            // Same treatment as UnsupportedCodec (D-25): a named, catchable flint-owned exception
+            PydartError::UnsupportedCodec(_) => PyPydartError::new_err(err.to_string()),
+            // Same treatment as UnsupportedCodec (D-25): a named, catchable pydart-owned exception
             // naming the offending column/operator, never a builtin exception.
-            FlintError::UnsupportedFilterOperator { .. } => PyFlintError::new_err(err.to_string()),
-            // D-21: a named, catchable flint-owned exception naming both files and the
+            PydartError::UnsupportedFilterOperator { .. } => PyPydartError::new_err(err.to_string()),
+            // D-21: a named, catchable pydart-owned exception naming both files and the
             // mismatched column -- never a silent union/merge.
-            FlintError::ParquetSchemaMismatch { .. } => PyFlintError::new_err(err.to_string()),
-            // Same treatment as FlintError::Arrow/Other: wraps an underlying IO/parse failure
+            PydartError::ParquetSchemaMismatch { .. } => PyPydartError::new_err(err.to_string()),
+            // Same treatment as PydartError::Arrow/Other: wraps an underlying IO/parse failure
             // rather than a caller-input-validation failure.
-            FlintError::ParquetReadError { .. } => PyValueError::new_err(err.to_string()),
+            PydartError::ParquetReadError { .. } => PyValueError::new_err(err.to_string()),
             // Same treatment as UnsupportedCodec/UnsupportedFilterOperator/ParquetSchemaMismatch:
-            // a named, catchable flint-owned exception, not a builtin ValueError -- an empty
+            // a named, catchable pydart-owned exception, not a builtin ValueError -- an empty
             // directory/list is a caller-input-validation failure, not a wrapped IO/parse error.
-            FlintError::InvalidParquetPathArgument(_) => PyFlintError::new_err(err.to_string()),
-            FlintError::Arrow(_) => PyValueError::new_err(err.to_string()),
-            FlintError::Other(_) => PyValueError::new_err(err.to_string()),
+            PydartError::InvalidParquetPathArgument(_) => PyPydartError::new_err(err.to_string()),
+            PydartError::Arrow(_) => PyValueError::new_err(err.to_string()),
+            PydartError::Other(_) => PyValueError::new_err(err.to_string()),
         }
     }
 }

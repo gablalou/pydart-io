@@ -1,6 +1,6 @@
-//! D-06b: allocation-counting proof that `flint_core::from_numpy_buffer` -- the borrow-conversion
+//! D-06b: allocation-counting proof that `pydart_core::from_numpy_buffer` -- the borrow-conversion
 //! entry point wrapping an existing buffer via `arrow_buffer::Buffer::from_custom_allocation`
-//! (the same technique `flint-python`'s `borrow_numpy_numeric_column` uses for the real numpy
+//! (the same technique `pydart-python`'s `borrow_numpy_numeric_column` uses for the real numpy
 //! borrow) -- makes NO heap allocation for the data buffer (the locked truth in this plan's
 //! `must_haves`/objective/threat-model, all worded "no heap allocation *for the data buffer*").
 //!
@@ -53,7 +53,7 @@ const DATA_LEN: usize = 10_000;
 const METADATA_OVERHEAD_THRESHOLD_BYTES: u64 = 1024;
 
 /// The core proof: converting a pre-existing, large `i64` buffer via
-/// `flint_core::from_numpy_buffer` allocates far less heap memory than the data buffer itself --
+/// `pydart_core::from_numpy_buffer` allocates far less heap memory than the data buffer itself --
 /// i.e. it borrows the data rather than copying it. Only small, constant, data-size-independent
 /// metadata bookkeeping (`Arc<Bytes>`/`Arc<dyn Array>` control blocks) is allocated; see the
 /// module doc comment for why `count_total == 0` is not the right assertion here.
@@ -69,7 +69,7 @@ fn from_numpy_buffer_allocates_nothing_for_the_data_buffer() {
         // measured closure -- it is not dropped until after `info` above is computed, so the
         // pointer/length passed here remain valid for the entire borrow, satisfying
         // `from_numpy_buffer`'s safety contract.
-        let array = unsafe { flint_core::from_numpy_buffer(ptr, len) };
+        let array = unsafe { pydart_core::from_numpy_buffer(ptr, len) };
         // Pitfall 4 guard: force the optimizer to treat the converted array as used, so it
         // cannot elide the conversion (and thus cannot produce a false-negative zero count).
         // `allocation_counter::measure` takes an `FnOnce()` (no return value), so the guard is
@@ -79,7 +79,7 @@ fn from_numpy_buffer_allocates_nothing_for_the_data_buffer() {
 
     assert!(
         info.bytes_total < METADATA_OVERHEAD_THRESHOLD_BYTES,
-        "flint_core::from_numpy_buffer allocated {} bytes (data buffer is {len} bytes) -- this \
+        "pydart_core::from_numpy_buffer allocated {} bytes (data buffer is {len} bytes) -- this \
          is no longer a zero-copy borrow, it looks like a data copy",
         info.bytes_total
     );

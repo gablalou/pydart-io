@@ -1,18 +1,18 @@
 //! Single source-of-truth Parquet read/write logic (PARQ-01..PARQ-05, D-28).
 //!
 //! `write_parquet`/`read_parquet` are the ONLY functions that touch the `parquet` crate directly
-//! -- `crates/flint-python/src/table.rs`'s `to_parquet`/`from_parquet` `#[pymethods]` parse the
+//! -- `crates/pydart-python/src/table.rs`'s `to_parquet`/`from_parquet` `#[pymethods]` parse the
 //! Python-facing `str`/`pathlib.Path`/filter-tuple/column-list arguments and then delegate here,
 //! never re-deriving any `ArrowWriter`/`ParquetRecordBatchReaderBuilder` call themselves. Plan 04
 //! extends this module (multi-file, dtype fidelity) without re-deriving IO logic elsewhere --
 //! mirrors `pandas_plan.rs`'s single-decision-point discipline.
 //!
-//! This module has no `pyo3`/`pyo3-arrow` dependency (see `flint-core`'s crate-level doc comment)
+//! This module has no `pyo3`/`pyo3-arrow` dependency (see `pydart-core`'s crate-level doc comment)
 //! so the write/read logic itself is unit-testable without a Python interpreter attached. Errors
-//! are surfaced as `parquet::errors::ParquetError` (this crate cannot depend on `flint-python`'s
-//! `FlintError`, which itself depends on `pyo3` -- that would be a circular dependency); the
-//! PyO3 boundary in `flint-python/src/table.rs` maps `ParquetError` onto `FlintError::Other`.
-//! `FlintError::UnsupportedFilterOperator` (D-25 rejection) is raised entirely at that boundary,
+//! are surfaced as `parquet::errors::ParquetError` (this crate cannot depend on `pydart-python`'s
+//! `PydartError`, which itself depends on `pyo3` -- that would be a circular dependency); the
+//! PyO3 boundary in `pydart-python/src/table.rs` maps `ParquetError` onto `PydartError::Other`.
+//! `PydartError::UnsupportedFilterOperator` (D-25 rejection) is raised entirely at that boundary,
 //! BEFORE any `FilterExpr` is built -- this module never sees an unrecognized operator string.
 //!
 //! Every parquet-crate `Result` is `?`-propagated -- this module NEVER calls `.unwrap()`/
@@ -74,7 +74,7 @@ use crate::parquet_filter::{could_match_range, FilterExpr, Op, ScalarValue};
 /// themselves before calling (see `table.rs::to_parquet`), since
 /// `set_max_row_group_row_count(Some(0))` panics rather than returning a `Result` -- keeping this
 /// function's only failure mode the codec match lets the PyO3 boundary map every `Err` here
-/// directly onto `FlintError::UnsupportedCodec` without misattributing a different failure.
+/// directly onto `PydartError::UnsupportedCodec` without misattributing a different failure.
 ///
 /// Uses `set_max_row_group_row_count` (row-count semantics, D-30) rather than the deprecated
 /// `set_max_row_group_size` (deprecated since parquet 58.0.0) or the byte-based
@@ -137,7 +137,7 @@ pub fn write_parquet(
 /// A Parquet file can be split across multiple (surviving) row groups, each yielding its own
 /// `RecordBatch` from the reader; these are concatenated into a single `RecordBatch` via
 /// `arrow::compute::concat_batches` (an honest, `?`-propagated concat, not a first-batch-only
-/// truncation -- the same discipline that fixed CR-01 in `flint-python/src/pandas.rs`). A file
+/// truncation -- the same discipline that fixed CR-01 in `pydart-python/src/pandas.rs`). A file
 /// with zero surviving row groups/batches returns a 0-row `RecordBatch` built from the reader's
 /// own resolved (already-projected) schema, rather than erroring.
 pub fn read_parquet(
@@ -202,10 +202,10 @@ pub fn read_parquet(
 /// Errors specific to reading MULTIPLE Parquet files as one `Table` (D-21).
 ///
 /// Kept separate from the plain `ParquetError` `read_parquet` uses, so the PyO3 boundary
-/// (`flint-python/src/table.rs`) can construct the precise, named
-/// `FlintError::ParquetSchemaMismatch`/`FlintError::ParquetReadError` variant directly from
+/// (`pydart-python/src/table.rs`) can construct the precise, named
+/// `PydartError::ParquetSchemaMismatch`/`PydartError::ParquetReadError` variant directly from
 /// structured fields, without string-sniffing an underlying `ParquetError`'s message -- the same
-/// "structured info crosses the flint-core/flint-python boundary" discipline as
+/// "structured info crosses the pydart-core/pydart-python boundary" discipline as
 /// `build_writer_properties`'s codec-only-fallible design (Plan 02).
 #[derive(Debug)]
 pub enum MultiParquetReadError {

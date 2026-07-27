@@ -1,8 +1,8 @@
-//! pandas <-> Arrow per-column conversion, driven by `flint_core::pandas_plan::plan_column`.
+//! pandas <-> Arrow per-column conversion, driven by `pydart_core::pandas_plan::plan_column`.
 //!
 //! Per RESEARCH.md Pattern 3 / Pitfall 2, every column's copy-vs-borrow decision is made by the
-//! single `plan_column` function in `flint-core` -- this module NEVER re-implements that
-//! decision, it only acts on it. `crates/flint-python/src/diagnostics.rs` (Task 2) consumes the
+//! single `plan_column` function in `pydart-core` -- this module NEVER re-implements that
+//! decision, it only acts on it. `crates/pydart-python/src/diagnostics.rs` (Task 2) consumes the
 //! same `ColumnConversionRecord`s produced here for strict mode (D-03) and `copy_report()` (D-04),
 //! so the two features can never silently disagree.
 //!
@@ -36,9 +36,9 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAnyMethods, PyCapsule, PyList};
 use pyo3_arrow::PyTable;
 
-use flint_core::pandas_plan::{plan_column, ArrowKind, ColumnPlan, DtypeBackend};
+use pydart_core::pandas_plan::{plan_column, ArrowKind, ColumnPlan, DtypeBackend};
 
-use crate::error::FlintError;
+use crate::error::PydartError;
 
 /// A single column's conversion outcome, retained on `Table` so `copy_report()` (D-04) and
 /// strict-mode (D-03) -- both in `crate::diagnostics` -- report the ACTUAL decision `from_pandas`
@@ -78,7 +78,7 @@ pub struct FromPandasOutcome {
 }
 
 /// Determine a column's `(DtypeBackend, ArrowKind)` from its pandas dtype, rejecting anything
-/// outside this phase's numeric/bool scope with a `FlintError::UnsupportedColumn` naming the
+/// outside this phase's numeric/bool scope with a `PydartError::UnsupportedColumn` naming the
 /// column and dtype (no silent copy/acceptance of out-of-scope dtypes, matching Plan 01's
 /// established rejection behavior).
 ///
@@ -170,7 +170,7 @@ fn classify_dtype(
             // plain-numpy branches below.
             let unit: String = pyarrow_dtype.getattr("unit")?.extract()?;
             if unit != "ns" {
-                return Err(FlintError::UnsupportedColumn {
+                return Err(PydartError::UnsupportedColumn {
                     column: column_name.to_string(),
                     dtype: dtype_str,
                     reason: non_ns_temporal_rejection_reason(&unit),
@@ -182,7 +182,7 @@ fn classify_dtype(
         } else if is_duration {
             let unit: String = pyarrow_dtype.getattr("unit")?.extract()?;
             if unit != "ns" {
-                return Err(FlintError::UnsupportedColumn {
+                return Err(PydartError::UnsupportedColumn {
                     column: column_name.to_string(),
                     dtype: dtype_str,
                     reason: non_ns_temporal_rejection_reason(&unit),
@@ -191,7 +191,7 @@ fn classify_dtype(
             }
             ArrowKind::Duration
         } else {
-            return Err(FlintError::UnsupportedColumn {
+            return Err(PydartError::UnsupportedColumn {
                 column: column_name.to_string(),
                 dtype: dtype_str,
                 reason: "only numeric (int/uint/float), boolean, string, timestamp, and \
@@ -224,7 +224,7 @@ fn classify_dtype(
     if dtype.is_instance(datetime_tz_dtype_type)? {
         let unit: String = dtype.getattr("unit")?.extract()?;
         if unit != "ns" {
-            return Err(FlintError::UnsupportedColumn {
+            return Err(PydartError::UnsupportedColumn {
                 column: column_name.to_string(),
                 dtype: dtype_str,
                 reason: non_ns_temporal_rejection_reason(&unit),
@@ -244,10 +244,10 @@ fn classify_dtype(
     // honestly, BEFORE the plain-numpy `.values.flags` access in `from_pandas` is ever reached
     // (D-08 / Pitfall 1: masked extension arrays like `IntegerArray`/`BooleanArray` have no
     // `.flags` attribute and previously crashed with a raw AttributeError instead of a clean
-    // FlintError).
+    // PydartError).
     if dtype.is_instance(extension_dtype_type)? {
         let dtype_type_name: String = dtype.get_type().name()?.extract()?;
-        return Err(FlintError::UnsupportedColumn {
+        return Err(PydartError::UnsupportedColumn {
             column: column_name.to_string(),
             dtype: dtype_str,
             reason: format!(
@@ -276,7 +276,7 @@ fn classify_dtype(
             let datetime_data = numpy.call_method1("datetime_data", (dtype,))?;
             let unit: String = datetime_data.get_item(0)?.extract()?;
             if unit != "ns" {
-                return Err(FlintError::UnsupportedColumn {
+                return Err(PydartError::UnsupportedColumn {
                     column: column_name.to_string(),
                     dtype: dtype_str,
                     reason: non_ns_temporal_rejection_reason(&unit),
@@ -290,7 +290,7 @@ fn classify_dtype(
             }
         }
         _ => {
-            return Err(FlintError::UnsupportedColumn {
+            return Err(PydartError::UnsupportedColumn {
                 column: column_name.to_string(),
                 dtype: dtype_str,
                 reason: "only numeric (int/uint/float), boolean, object/string, datetime64, \
@@ -310,7 +310,7 @@ fn classify_dtype(
 /// pandas 3.0 changed `pd.to_datetime()`/`pd.to_timedelta()`'s default parsing resolution from
 /// nanoseconds to microseconds -- the single most common way a pandas-3.0 user builds a
 /// datetime/timedelta column (with no explicit `dtype=`) now yields `us` resolution, which
-/// Flint rejects per D-15's ns-only scope. The message explicitly names this pandas-3.0
+/// Pydart rejects per D-15's ns-only scope. The message explicitly names this pandas-3.0
 /// behavior change and suggests the `.astype('datetime64[ns]')` fix, rather than reading as a
 /// confusing, unexplained failure.
 fn non_ns_temporal_rejection_reason(actual_unit: &str) -> String {
@@ -320,7 +320,7 @@ fn non_ns_temporal_rejection_reason(actual_unit: &str) -> String {
          the default parsing resolution of pd.to_datetime()/pd.to_timedelta() from nanoseconds \
          to microseconds, so a column built without an explicit dtype may now be {actual_unit:?} \
          resolution -- cast it explicitly, e.g. .astype('datetime64[ns]') (or the timedelta64 \
-         equivalent), before calling flint.Table.from_pandas"
+         equivalent), before calling pydart.Table.from_pandas"
     )
 }
 
@@ -386,8 +386,8 @@ pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandas
 
         // D-11 / RESEARCH.md Pitfall 2: a numpy object-dtype string column's content is NOT
         // safe to trust to pyarrow's own type inference (it silently accepts dict-valued and
-        // int-valued columns, and raises order-dependent, non-Flint-owned errors on genuinely
-        // mixed columns). Run this Flint-owned validation pass BEFORE any conversion is
+        // int-valued columns, and raises order-dependent, non-Pydart-owned errors on genuinely
+        // mixed columns). Run this Pydart-owned validation pass BEFORE any conversion is
         // attempted for exactly this (Numpy, String) case. The ArrowDtype string case does NOT
         // get this validation -- its physical layout is already a typed Arrow string buffer.
         if matches!((dtype_backend, &arrow_kind), (DtypeBackend::Numpy, ArrowKind::String)) {
@@ -459,7 +459,7 @@ pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandas
     }
 
     let schema: SchemaRef = Arc::new(Schema::new(fields));
-    let batch = RecordBatch::try_new(schema, arrays).map_err(FlintError::from)?;
+    let batch = RecordBatch::try_new(schema, arrays).map_err(PydartError::from)?;
 
     Ok(FromPandasOutcome { batch, records })
 }
@@ -482,7 +482,7 @@ pub fn from_pandas(py: Python<'_>, df: &Bound<'_, PyAny>) -> PyResult<FromPandas
 /// the `borrow_numpy_numeric_column` fast path), NEVER `array.null_count() > 0`. Deriving
 /// nullability from the CURRENT batch's observed null count conflates "this batch happens to
 /// have zero nulls right now" with "this column's type cannot hold nulls" -- a nullable
-/// `int64[pyarrow]` column with zero nulls would otherwise round-trip as a `not null` Flint
+/// `int64[pyarrow]` column with zero nulls would otherwise round-trip as a `not null` Pydart
 /// schema field, breaking `pyarrow.concat_tables` against a genuinely-nullable sibling batch
 /// (the exact reproduction in 02-REVIEW.md). Because pyarrow's `__arrow_c_stream__` export marks
 /// EVERY column `nullable=True` (verified empirically, RESEARCH.md Summary/A5), this uniformly
@@ -561,23 +561,23 @@ fn import_column_via_pandas_stream(
 
     let columns: Vec<ArrayRef> = batches.iter().map(|b| b.column(0).clone()).collect();
     let column_refs: Vec<&dyn Array> = columns.iter().map(|c| c.as_ref()).collect();
-    let concatenated = arrow::compute::concat(&column_refs).map_err(FlintError::from)?;
+    let concatenated = arrow::compute::concat(&column_refs).map_err(PydartError::from)?;
     Ok((concatenated, batches.len(), declared_is_nullable))
 }
 
-/// Flint-owned content validation for a legacy numpy object-dtype column (D-11 / RESEARCH.md
+/// Pydart-owned content validation for a legacy numpy object-dtype column (D-11 / RESEARCH.md
 /// Pitfall 2).
 ///
 /// pandas'/pyarrow's own `__arrow_c_stream__` export infers the target Arrow type from an
 /// object column's contents rather than enforcing any caller-specified contract: a dict-valued
 /// column silently converts to a nested `struct`, an all-int column silently converts to
-/// `int64`, and a genuinely mixed-type column raises an order-dependent, non-Flint-owned
+/// `int64`, and a genuinely mixed-type column raises an order-dependent, non-Pydart-owned
 /// exception (a different pyarrow exception type depending on which non-str element is
 /// encountered first). None of that is acceptable for this project's "honest conversion"
 /// contract, so this function iterates the column's values in Python BEFORE
 /// `import_column_via_pandas_stream` is ever called for a `(DtypeBackend::Numpy,
 /// ArrowKind::String)` column, and rejects the first non-`None`/non-`NaN` value that is not a
-/// `str` with a `FlintError::UnsupportedColumn` naming the column, dtype "object", and the
+/// `str` with a `PydartError::UnsupportedColumn` naming the column, dtype "object", and the
 /// offending value's `type(v).__name__` plus its row index.
 fn validate_object_column_contents(series: &Bound<'_, PyAny>, column_name: &str) -> PyResult<()> {
     for (i, value) in series.try_iter()?.enumerate() {
@@ -594,12 +594,12 @@ fn validate_object_column_contents(series: &Bound<'_, PyAny>, column_name: &str)
         }
         if !value.is_instance_of::<pyo3::types::PyString>() {
             let value_type_name: String = value.get_type().name()?.extract()?;
-            return Err(FlintError::UnsupportedColumn {
+            return Err(PydartError::UnsupportedColumn {
                 column: column_name.to_string(),
                 dtype: "object".to_string(),
                 reason: format!(
                     "non-string value of type {value_type_name:?} found at row {i}; object-dtype \
-                     columns must contain only str values (and None/NaN) -- Flint does not rely \
+                     columns must contain only str values (and None/NaN) -- Pydart does not rely \
                      on pyarrow's own type inference for this, which would silently accept \
                      dict-valued or int-valued object columns instead of rejecting them"
                 ),
@@ -646,23 +646,23 @@ fn borrow_numpy_numeric_column(series: &Bound<'_, PyAny>, column_name: &str) -> 
     macro_rules! borrow {
         ($rust_ty:ty, $arrow_ty:ty) => {{
             let typed = values.cast::<PyArray1<$rust_ty>>().map_err(|_| {
-                FlintError::Other(format!(
+                PydartError::Other(format!(
                     "column {column_name:?}: expected a 1-D numpy array of {}",
                     stringify!($rust_ty)
                 ))
             })?;
             let readonly = typed
                 .try_readonly()
-                .map_err(|e| FlintError::Other(format!("column {column_name:?}: {e}")))?;
+                .map_err(|e| PydartError::Other(format!("column {column_name:?}: {e}")))?;
             let slice = readonly.as_slice().map_err(|e| {
-                FlintError::Other(format!(
+                PydartError::Other(format!(
                     "column {column_name:?}: numpy buffer is not contiguous ({e})"
                 ))
             })?;
             let len = slice.len();
             let byte_len = len * std::mem::size_of::<$rust_ty>();
             let ptr = NonNull::new(slice.as_ptr() as *mut u8).ok_or_else(|| {
-                FlintError::Other(format!(
+                PydartError::Other(format!(
                     "column {column_name:?}: numpy buffer pointer is null"
                 ))
             })?;
@@ -689,7 +689,7 @@ fn borrow_numpy_numeric_column(series: &Bound<'_, PyAny>, column_name: &str) -> 
         "float32" => borrow!(f32, Float32Type),
         "float64" => borrow!(f64, Float64Type),
         other => {
-            return Err(FlintError::Other(format!(
+            return Err(PydartError::Other(format!(
                 "column {column_name:?}: unsupported numpy numeric dtype {other:?}"
             ))
             .into())

@@ -1,9 +1,9 @@
 //! Pure-Rust in-memory table representation.
 //!
-//! Phase 1 keeps this deliberately thin: `flint-core`'s `Table` is a re-export of arrow-rs's own
+//! Phase 1 keeps this deliberately thin: `pydart-core`'s `Table` is a re-export of arrow-rs's own
 //! `RecordBatch`, since Plan 01's scope is the numeric happy-path round-trip, not a bespoke
 //! in-memory model. The PyO3-facing `Table` type (which composes `pyo3_arrow::PyTable`) lives in
-//! `crates/flint-python/src/table.rs`.
+//! `crates/pydart-python/src/table.rs`.
 
 use std::ptr::NonNull;
 use std::sync::Arc;
@@ -13,21 +13,21 @@ use arrow::array::{ArrayRef, PrimitiveArray};
 use arrow::buffer::{Buffer, ScalarBuffer};
 use arrow::datatypes::Int64Type;
 
-/// `flint-core`'s in-memory table representation: a thin re-export of arrow-rs's `RecordBatch`.
+/// `pydart-core`'s in-memory table representation: a thin re-export of arrow-rs's `RecordBatch`.
 pub type Table = arrow::record_batch::RecordBatch;
 
 /// Build an Arrow `Int64Array` directly from an existing, pre-allocated `i64` buffer, with NO
 /// copy of the underlying data bytes.
 ///
-/// This is the `flint-core` (pyo3-free) analog of `flint-python`'s `borrow_numpy_numeric_column`
-/// (`crates/flint-python/src/pandas.rs`): both wrap an existing buffer in an
+/// This is the `pydart-core` (pyo3-free) analog of `pydart-python`'s `borrow_numpy_numeric_column`
+/// (`crates/pydart-python/src/pandas.rs`): both wrap an existing buffer in an
 /// `arrow_buffer::Buffer` via `Buffer::from_custom_allocation`, which is the specific technique
 /// Plan 03's D-06b allocation-counting proof exists to certify makes zero heap allocations for
 /// the data buffer. This crate has no `pyo3` dependency (see crate-level doc comment), so unlike
-/// the `flint-python` version it cannot itself tie the returned array's lifetime to a `Py<T>`
+/// the `pydart-python` version it cannot itself tie the returned array's lifetime to a `Py<T>`
 /// owner — this function only proves the buffer-wrapping technique itself is allocation-free; it
 /// is exercised directly by `tests/rust/zero_copy_alloc.rs`, not by the production pandas
-/// conversion path (which continues to go through `flint-python::pandas::borrow_numpy_numeric_column`
+/// conversion path (which continues to go through `pydart-python::pandas::borrow_numpy_numeric_column`
 /// for the real, GIL-safe ownership handoff).
 ///
 /// # Safety

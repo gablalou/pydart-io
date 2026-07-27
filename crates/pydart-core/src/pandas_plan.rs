@@ -1,13 +1,13 @@
 //! Single source-of-truth per-column pandas<->Arrow conversion decision.
 //!
 //! `plan_column` is the ONE function that both the `from_pandas`/`to_pandas` conversion path
-//! (`crates/flint-python/src/pandas.rs`) and the strict-mode/`copy_report()` diagnostics surface
-//! (`crates/flint-python/src/diagnostics.rs`) consume. Per RESEARCH.md Pitfall 2
+//! (`crates/pydart-python/src/pandas.rs`) and the strict-mode/`copy_report()` diagnostics surface
+//! (`crates/pydart-python/src/diagnostics.rs`) consume. Per RESEARCH.md Pitfall 2
 //! (apache/arrow#39194), the decision MUST be made per-column and MUST be the same decision for
 //! both features -- never implement this matrix twice, and never gate strict mode with a
 //! whole-table try/catch.
 //!
-//! This module has no `pyo3`/`pyo3-arrow` dependency (see `flint-core`'s crate-level doc comment)
+//! This module has no `pyo3`/`pyo3-arrow` dependency (see `pydart-core`'s crate-level doc comment)
 //! so the matrix itself can be unit-tested without a Python interpreter attached.
 
 /// Which memory layout backs a pandas column's dtype.
@@ -28,7 +28,7 @@ pub enum DtypeBackend {
 /// The logical Arrow type category a column's values fall into.
 ///
 /// Carries `Timestamp { tz }`'s owned `String` for the tz name, so `ArrowKind` no longer
-/// derives `Copy` (only `Clone`) -- see call sites in `crates/flint-python/src/pandas.rs` for
+/// derives `Copy` (only `Clone`) -- see call sites in `crates/pydart-python/src/pandas.rs` for
 /// the resulting clone-vs-move adjustments.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ArrowKind {
@@ -41,7 +41,7 @@ pub enum ArrowKind {
     /// columns (already Arrow memory) and legacy numpy `object`-dtype columns of Python `str`
     /// values (no Arrow-compatible physical layout, requires a copy). See D-10/D-11 and
     /// RESEARCH.md Pitfall 2 for the content-validation requirement specific to the numpy-object
-    /// case, enforced by `crates/flint-python/src/pandas.rs`'s
+    /// case, enforced by `crates/pydart-python/src/pandas.rs`'s
     /// `validate_object_column_contents`, not by this matrix.
     String,
     /// pandas `Categorical` (ordered or unordered). Always paired with
@@ -53,7 +53,7 @@ pub enum ArrowKind {
     /// Nanosecond-resolution timestamp, optionally timezone-aware (D-15/D-16, CONV-06). `tz` is
     /// `None` for a naive `datetime64[ns]` column and `Some(tz_string)` (round-tripped exactly
     /// as-is, no UTC normalization) for a tz-aware `datetime64[ns, tz]`/`timestamp[ns, tz]`
-    /// column. `classify_dtype` (crates/flint-python/src/pandas.rs) only ever constructs this
+    /// column. `classify_dtype` (crates/pydart-python/src/pandas.rs) only ever constructs this
     /// variant after confirming ns resolution -- any other resolution is rejected before this
     /// variant is built, so this matrix never has to re-check resolution.
     Timestamp { tz: Option<String> },

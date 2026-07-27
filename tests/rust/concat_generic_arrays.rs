@@ -4,12 +4,12 @@
 //! `DurationArray` inputs.
 //!
 //! This de-risks Plans 03-04's reliance on the existing multi-chunk concat fallback
-//! (`crates/flint-python/src/pandas.rs::import_column_via_pandas_stream`, lines 215-218): if
+//! (`crates/pydart-python/src/pandas.rs::import_column_via_pandas_stream`, lines 215-218): if
 //! `concat` already handles these array types generically, Plans 03/04 need no type-specific
 //! multi-chunk handling of their own for Dictionary/Timestamp(tz)/Duration columns.
 //!
 //! Self-contained: constructs arrays directly via arrow-rs 59.1.0 APIs, with no dependency on any
-//! flint classification/routing code.
+//! pydart classification/routing code.
 
 use std::sync::Arc;
 

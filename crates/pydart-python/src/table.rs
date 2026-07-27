@@ -1,4 +1,4 @@
-//! `flint.Table`: composes `pyo3_arrow::PyTable`, never hand-rolls PyCapsule/FFI marshalling.
+//! `pydart.Table`: composes `pyo3_arrow::PyTable`, never hand-rolls PyCapsule/FFI marshalling.
 //!
 //! Per RESEARCH.md Pattern 1 and 01-PATTERNS.md, `Table` holds a `pyo3_arrow::PyTable` as an
 //! internal field and delegates the Arrow PyCapsule Interface dunders to it. `PyTable`'s own
@@ -9,7 +9,7 @@
 //! already-registered Python methods; it does not reimplement any of that marshalling.
 //!
 //! `from_pandas`'s per-column copy-vs-borrow decision logic lives in `crate::pandas` (driven by
-//! `flint_core::pandas_plan::plan_column`, the single source of truth also consumed by Task 2's
+//! `pydart_core::pandas_plan::plan_column`, the single source of truth also consumed by Task 2's
 //! strict mode / `copy_report()`). This module stays a thin `#[pyclass]` shell.
 //!
 //! ## `to_pandas` reverse-direction zero-copy confirmation (CONV-02)
@@ -36,19 +36,19 @@ use std::path::PathBuf;
 
 use arrow::array::Array;
 use arrow::compute::concat_batches;
-use flint_core::parquet_filter::{FilterExpr, Op, ScalarValue};
+use pydart_core::parquet_filter::{FilterExpr, Op, ScalarValue};
 use pyo3::prelude::*;
 use pyo3::types::{PyCapsule, PyCFunction, PyDict, PyTuple, PyType};
 use pyo3_arrow::PyTable;
 
 use crate::diagnostics;
-use crate::error::FlintError;
+use crate::error::PydartError;
 use crate::pandas::{self, ColumnConversionRecord};
 
 /// Map a `filters=[(column, operator, value), ...]` tuple's operator string to the fixed D-25
-/// six-operator `Op` set. Any other string raises `FlintError::UnsupportedFilterOperator` naming
+/// six-operator `Op` set. Any other string raises `PydartError::UnsupportedFilterOperator` naming
 /// the offending column + operator (D-25) -- never a silently skipped/ignored filter tuple.
-fn parse_filter_operator(column: &str, operator: &str) -> Result<Op, FlintError> {
+fn parse_filter_operator(column: &str, operator: &str) -> Result<Op, PydartError> {
     match operator {
         "==" => Ok(Op::Eq),
         "!=" => Ok(Op::Ne),
@@ -56,7 +56,7 @@ fn parse_filter_operator(column: &str, operator: &str) -> Result<Op, FlintError>
         "<=" => Ok(Op::Le),
         ">" => Ok(Op::Gt),
         ">=" => Ok(Op::Ge),
-        other => Err(FlintError::UnsupportedFilterOperator {
+        other => Err(PydartError::UnsupportedFilterOperator {
             column: column.to_string(),
             operator: other.to_string(),
         }),
@@ -64,7 +64,7 @@ fn parse_filter_operator(column: &str, operator: &str) -> Result<Op, FlintError>
 }
 
 /// Resolve `Table.from_parquet`'s `path` argument (D-21: `str`/`Path`, a directory, or a list of
-/// `str`/`Path`) into a `Vec<PathBuf>` for `flint_core::parquet_io::read_parquet_multi`.
+/// `str`/`Path`) into a `Vec<PathBuf>` for `pydart_core::parquet_io::read_parquet_multi`.
 ///
 /// Tries single-path (`str`/`pathlib.Path`, `os.PathLike`-aware) extraction FIRST -- a Python
 /// `list`/`tuple` has no `__fspath__` and is not `str`/`bytes`, so this always fails cleanly for
@@ -73,26 +73,26 @@ fn parse_filter_operator(column: &str, operator: &str) -> Result<Op, FlintError>
 ///
 /// - A single path that IS a directory: all `*.parquet` entries within it, sorted
 ///   lexicographically by filename (D-21 ordering edge, deterministic). A directory with zero
-///   `.parquet` files raises `FlintError::Other` (D-21 empty edge) rather than silently
+///   `.parquet` files raises `PydartError::Other` (D-21 empty edge) rather than silently
 ///   returning an empty `Table`.
 /// - A single path that is a file: unchanged single-element-vec behavior (D-21 empty/single
 ///   edge: identical to what `from_parquet` already did before this plan).
 /// - A Python list/tuple of `str`/`Path`: that list in the given order (D-21 ordering edge). An
-///   empty list raises `FlintError::Other`. A directory found INSIDE a list is rejected (kept
+///   empty list raises `PydartError::Other`. A directory found INSIDE a list is rejected (kept
 ///   distinct from the single-path directory-auto-discovery mode, per this plan's own
 ///   discretion note) -- a non-existent path or a non-`.parquet`-extension file passed
-///   explicitly as a list element raises `FlintError::ParquetReadError` naming that path (D-21
+///   explicitly as a list element raises `PydartError::ParquetReadError` naming that path (D-21
 ///   security note: never silently skip/include).
 fn resolve_parquet_paths(path_arg: &Bound<'_, PyAny>) -> PyResult<Vec<PathBuf>> {
     if let Ok(single) = path_arg.extract::<PathBuf>() {
         if single.is_dir() {
-            let entries = std::fs::read_dir(&single).map_err(|e| FlintError::ParquetReadError {
+            let entries = std::fs::read_dir(&single).map_err(|e| PydartError::ParquetReadError {
                 path: single.display().to_string(),
                 reason: e.to_string(),
             })?;
             let mut files: Vec<PathBuf> = entries
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| FlintError::ParquetReadError {
+                .map_err(|e| PydartError::ParquetReadError {
                     path: single.display().to_string(),
                     reason: e.to_string(),
                 })?
@@ -102,7 +102,7 @@ fn resolve_parquet_paths(path_arg: &Bound<'_, PyAny>) -> PyResult<Vec<PathBuf>> 
                 .collect();
             files.sort();
             if files.is_empty() {
-                return Err(FlintError::InvalidParquetPathArgument(format!(
+                return Err(PydartError::InvalidParquetPathArgument(format!(
                     "directory {single:?} contains no .parquet files"
                 ))
                 .into());
@@ -114,21 +114,21 @@ fn resolve_parquet_paths(path_arg: &Bound<'_, PyAny>) -> PyResult<Vec<PathBuf>> 
 
     if let Ok(list) = path_arg.extract::<Vec<PathBuf>>() {
         if list.is_empty() {
-            return Err(FlintError::InvalidParquetPathArgument(
+            return Err(PydartError::InvalidParquetPathArgument(
                 "from_parquet received an empty path list".to_string(),
             )
             .into());
         }
         for path in &list {
             if path.is_dir() {
-                return Err(FlintError::InvalidParquetPathArgument(format!(
+                return Err(PydartError::InvalidParquetPathArgument(format!(
                     "from_parquet path list element {path:?} is a directory; pass a directory \
                      as the sole path argument instead of inside a list"
                 ))
                 .into());
             }
             if !path.exists() {
-                return Err(FlintError::ParquetReadError {
+                return Err(PydartError::ParquetReadError {
                     path: path.display().to_string(),
                     reason: "no such file or directory".to_string(),
                 }
@@ -136,7 +136,7 @@ fn resolve_parquet_paths(path_arg: &Bound<'_, PyAny>) -> PyResult<Vec<PathBuf>> 
             }
             let is_parquet_ext = path.extension().and_then(|ext| ext.to_str()) == Some("parquet");
             if !is_parquet_ext {
-                return Err(FlintError::ParquetReadError {
+                return Err(PydartError::ParquetReadError {
                     path: path.display().to_string(),
                     reason: "expected a .parquet file extension".to_string(),
                 }
@@ -146,7 +146,7 @@ fn resolve_parquet_paths(path_arg: &Bound<'_, PyAny>) -> PyResult<Vec<PathBuf>> 
         return Ok(list);
     }
 
-    Err(FlintError::InvalidParquetPathArgument(
+    Err(PydartError::InvalidParquetPathArgument(
         "from_parquet's path argument must be a str, pathlib.Path, or a list of str/Path"
             .to_string(),
     )
@@ -172,13 +172,13 @@ fn parse_filter_value(value: &Bound<'_, PyAny>) -> PyResult<ScalarValue> {
         return Ok(ScalarValue::Utf8(s));
     }
     let type_name: String = value.get_type().name()?.extract()?;
-    Err(FlintError::Other(format!(
+    Err(PydartError::Other(format!(
         "unsupported filter value type {type_name:?}: expected int, float, bool, or str"
     ))
     .into())
 }
 
-/// `flint.Table`: a thin `#[pyclass]` composing `pyo3_arrow::PyTable` (D-01).
+/// `pydart.Table`: a thin `#[pyclass]` composing `pyo3_arrow::PyTable` (D-01).
 #[pyclass(name = "Table")]
 pub struct Table {
     inner: Py<PyTable>,
@@ -211,13 +211,13 @@ impl Table {
     /// Build a `Table` from a pandas DataFrame, driving every column's copy-vs-borrow decision
     /// through `plan_column` (CONV-01/CONV-02, full numeric+bool matrix).
     ///
-    /// Any column outside this phase's numeric/bool scope raises `FlintError::UnsupportedColumn`
+    /// Any column outside this phase's numeric/bool scope raises `PydartError::UnsupportedColumn`
     /// naming the offending column and dtype (no silent copy).
     ///
     /// When `strict=True` (D-03, DIAG-01): `pandas::from_pandas` always computes AND applies
     /// every column's plan (conversion happens regardless of `strict`); this function then reads
     /// the resulting per-column records and, if ANY column's plan was `RequiresCopy`, discards the
-    /// already-built batch and raises `flint.ZeroCopyRequiredError` naming the first offending
+    /// already-built batch and raises `pydart.ZeroCopyRequiredError` naming the first offending
     /// column and its dtype. This is honest about being a per-column decision read off the real,
     /// already-computed plan for every column -- never a whole-table try/catch that loses
     /// per-column attribution (RESEARCH.md Pitfall 2) -- but it is NOT a zero-work pre-conversion
@@ -288,7 +288,7 @@ impl Table {
 
         let batches = self.inner.bind(py).get().batches().to_vec();
         let schema = batches.first().map(|batch| batch.schema()).ok_or_else(|| {
-            FlintError::Other("cannot reconstruct a pandas DataFrame from an empty Table".to_string())
+            PydartError::Other("cannot reconstruct a pandas DataFrame from an empty Table".to_string())
         })?;
         let owned_table = PyTable::try_new(batches, schema)?;
         let pa_table = owned_table.into_pyarrow(py)?;
@@ -334,21 +334,21 @@ impl Table {
     /// `path` accepts a `str`/`pathlib.Path` (a single file OR a directory, D-20/D-21), or a
     /// Python list of `str`/`Path` (D-21) -- resolved to a `Vec<PathBuf>` by
     /// `resolve_parquet_paths` (see its own doc comment for the full directory/list/empty-edge
-    /// contract). Any other argument type fails with a clear `FlintError`/`TypeError` rather than
+    /// contract). Any other argument type fails with a clear `PydartError`/`TypeError` rather than
     /// being silently coerced.
     ///
     /// `filters` is a flat list of `(column: str, operator: str, value)` 3-tuples (D-23) --
     /// multiple tuples combine with AND only (D-24, no OR/nested-list support). Each tuple is
-    /// parsed ONCE, here, into a `flint_core::parquet_filter::FilterExpr`: the operator string is
+    /// parsed ONCE, here, into a `pydart_core::parquet_filter::FilterExpr`: the operator string is
     /// mapped via `parse_filter_operator`'s exhaustive match (an unrecognized operator raises
-    /// `FlintError::UnsupportedFilterOperator` naming the column + operator, D-25 -- never a
+    /// `PydartError::UnsupportedFilterOperator` naming the column + operator, D-25 -- never a
     /// silently skipped tuple), and the value is extracted via `parse_filter_value`. The resulting
     /// `Vec<FilterExpr>` is built exactly once and passed to `read_parquet_multi`, which is the
     /// single place that consumes it (via `read_parquet` per file) for BOTH the row-group skip
     /// decision and the row-level filter (single-source-of-truth; this classmethod never
     /// re-derives or re-parses it).
     ///
-    /// Delegates the actual file IO entirely to the pyo3-free `flint_core::parquet_io::
+    /// Delegates the actual file IO entirely to the pyo3-free `pydart_core::parquet_io::
     /// read_parquet_multi` (D-21: strict cross-file schema-match, never a silent union/merge) --
     /// no `parquet`-crate call happens in this crate. `column_reports: Vec::new()` (mirroring
     /// `from_pytable`'s empty-report convention) since a Parquet read did not go through
@@ -376,23 +376,23 @@ impl Table {
 
         let paths = resolve_parquet_paths(&path)?;
 
-        let batch = flint_core::parquet_io::read_parquet_multi(
+        let batch = pydart_core::parquet_io::read_parquet_multi(
             &paths,
             columns.as_deref(),
             &filter_exprs,
         )
         .map_err(|err| match err {
-            flint_core::parquet_io::MultiParquetReadError::SchemaMismatch {
+            pydart_core::parquet_io::MultiParquetReadError::SchemaMismatch {
                 first_file,
                 other_file,
                 column,
-            } => FlintError::ParquetSchemaMismatch {
+            } => PydartError::ParquetSchemaMismatch {
                 first_file,
                 other_file,
                 column,
             },
-            flint_core::parquet_io::MultiParquetReadError::Read { path, source } => {
-                FlintError::ParquetReadError {
+            pydart_core::parquet_io::MultiParquetReadError::Read { path, source } => {
+                PydartError::ParquetReadError {
                     path,
                     reason: source.to_string(),
                 }
@@ -411,7 +411,7 @@ impl Table {
     ///
     /// Accepts a `str` or `pathlib.Path` (D-20). Overwrites an existing file silently (D-22 --
     /// `std::fs::File::create` truncate semantics, enforced inside
-    /// `flint_core::parquet_io::write_parquet`). Gathers this Table's batches into a single
+    /// `pydart_core::parquet_io::write_parquet`). Gathers this Table's batches into a single
     /// `RecordBatch` (concatenating via `arrow::compute::concat_batches` when there is more than
     /// one) to match `write_parquet`'s single-batch signature -- mirrors `to_pandas`'s
     /// batch-gathering step (lines above), but a 0-row batch (the empty-table case) still writes
@@ -420,13 +420,13 @@ impl Table {
     ///
     /// `compression` (D-29, default `"snappy"` per D-28) selects one of exactly four codecs --
     /// `"snappy"`/`"zstd"`/`"gzip"`/`"uncompressed"` -- validated by
-    /// `flint_core::parquet_io::build_writer_properties`'s exhaustive match; any other string
-    /// raises `flint.FlintError` (`FlintError::UnsupportedCodec`) naming the offending string, and
+    /// `pydart_core::parquet_io::build_writer_properties`'s exhaustive match; any other string
+    /// raises `pydart.PydartError` (`PydartError::UnsupportedCodec`) naming the offending string, and
     /// no file is written (validation happens before `File::create`). `row_group_size` (D-30,
     /// default `1_048_576` rows, matching pyarrow's default) is a ROW COUNT, not a byte size --
     /// `0` is rejected here (rather than reaching `set_max_row_group_row_count`'s internal
     /// `assert_ne!(value, Some(0), ...)` panic) so a bad Python-side argument surfaces as a named
-    /// `FlintError`, never an aborted interpreter.
+    /// `PydartError`, never an aborted interpreter.
     #[pyo3(signature = (path, compression="snappy", row_group_size=1_048_576))]
     fn to_parquet(
         &self,
@@ -436,22 +436,22 @@ impl Table {
         row_group_size: usize,
     ) -> PyResult<()> {
         if row_group_size == 0 {
-            return Err(FlintError::Other(
+            return Err(PydartError::Other(
                 "row_group_size must be greater than 0".to_string(),
             )
             .into());
         }
 
-        let properties = flint_core::parquet_io::build_writer_properties(
+        let properties = pydart_core::parquet_io::build_writer_properties(
             compression,
             row_group_size,
         )
-        .map_err(|_| FlintError::UnsupportedCodec(compression.to_string()))?;
+        .map_err(|_| PydartError::UnsupportedCodec(compression.to_string()))?;
 
         let batches = self.inner.bind(py).get().batches().to_vec();
         let batch = match batches.len() {
             0 => {
-                return Err(FlintError::Other(
+                return Err(PydartError::Other(
                     "cannot write an empty Table with no record batches to Parquet".to_string(),
                 )
                 .into())
@@ -459,12 +459,12 @@ impl Table {
             1 => batches.into_iter().next().expect("checked len == 1 above"),
             _ => {
                 let schema = batches[0].schema();
-                concat_batches(&schema, &batches).map_err(FlintError::Arrow)?
+                concat_batches(&schema, &batches).map_err(PydartError::Arrow)?
             }
         };
 
-        flint_core::parquet_io::write_parquet(&batch, &path, properties).map_err(|err| {
-            FlintError::Other(format!("failed to write Parquet file {path:?}: {err}"))
+        pydart_core::parquet_io::write_parquet(&batch, &path, properties).map_err(|err| {
+            PydartError::Other(format!("failed to write Parquet file {path:?}: {err}"))
         })?;
         Ok(())
     }
@@ -521,10 +521,10 @@ impl Table {
         let batches = bound.get().batches();
         let batch = batches
             .first()
-            .ok_or_else(|| FlintError::Other("Table has no record batches".to_string()))?;
+            .ok_or_else(|| PydartError::Other("Table has no record batches".to_string()))?;
 
         if index >= batch.num_columns() {
-            return Err(FlintError::Other(format!(
+            return Err(PydartError::Other(format!(
                 "column index {index} out of range (table has {} columns)",
                 batch.num_columns()
             ))
@@ -540,7 +540,7 @@ impl Table {
         Ok(address)
     }
 
-    /// Return per-column zero-copy diagnostics (DIAG-02, D-04): one `flint.ColumnCopyStatus` per
+    /// Return per-column zero-copy diagnostics (DIAG-02, D-04): one `pydart.ColumnCopyStatus` per
     /// column, derived from the SAME per-column plan `from_pandas` used to build this `Table` --
     /// not a re-derived decision, so this can never silently disagree with strict mode (T-01-05).
     fn copy_report(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
