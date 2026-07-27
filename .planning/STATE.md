@@ -7,8 +7,8 @@ current_phase_name: Benchmark & Release Readiness
 status: planning
 stopped_at: Completed 03-04-PLAN.md
 last_updated: "2026-07-24T11:10:47.086Z"
-last_activity: 2026-07-24
-last_activity_desc: Phase 03 complete, transitioned to Phase 4
+last_activity: 2026-07-27
+last_activity_desc: Completed quick task 260727-ih5: renamed project from flint to pydart
 progress:
   total_phases: 3
   completed_phases: 3
@@ -128,6 +128,7 @@ None yet.
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 260715-smf | Fix CR-01: from_pandas silently truncates multi-chunk Arrow-backed pandas columns to only the first chunk | 2026-07-15 | b5df2da | [260715-smf-fix-cr-01-from-pandas-silently-truncates](./quick/260715-smf-fix-cr-01-from-pandas-silently-truncates/) |
+| 260727-ih5 | Rename the project from flint to pydart across the entire codebase (crate names, Python import path, module name, docs, tests) | 2026-07-27 | ec5bea7 | [260727-ih5-rename-the-project-from-flint-to-pydart-](./quick/260727-ih5-rename-the-project-from-flint-to-pydart-/) |
 
 ## Deferred Items
 
