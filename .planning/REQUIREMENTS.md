@@ -1,4 +1,4 @@
-# Requirements: Flint (placeholder name)
+# Requirements: pydart
 
 **Defined:** 2026-07-13
 **Core Value:** Converting a pandas DataFrame to/from an Arrow Table should be zero-copy (or as close to it as physically possible) and measurably faster than pyarrow

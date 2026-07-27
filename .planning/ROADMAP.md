@@ -1,8 +1,8 @@
-# Roadmap: Flint (placeholder name)
+# Roadmap: pydart
 
 ## Overview
 
-Flint proves its reason to exist in four vertical slices. Phase 1 delivers the whole pipeline for the narrowest possible case — a non-null numeric/bool pandas DataFrame round-tripped zero-copy through Arrow, with the strict-mode/diagnostics API and PyCapsule interop built in from day one (not bolted on later). Phase 2 broadens that same pipeline to every realistic pandas dtype shape (nulls, strings, categoricals, datetime/timezone, timedelta, chunked arrays) so the conversion story is actually complete, not a numeric-only demo. Phase 3 adds Parquet IO as its own end-to-end, user-facing capability against the now-complete Arrow core. Phase 4 closes the loop: benchmark the core value claim against pyarrow across a realistic matrix, and package/ship it so it's actually installable and trustworthy for the open-source audience it targets.
+pydart proves its reason to exist in four vertical slices. Phase 1 delivers the whole pipeline for the narrowest possible case — a non-null numeric/bool pandas DataFrame round-tripped zero-copy through Arrow, with the strict-mode/diagnostics API and PyCapsule interop built in from day one (not bolted on later). Phase 2 broadens that same pipeline to every realistic pandas dtype shape (nulls, strings, categoricals, datetime/timezone, timedelta, chunked arrays) so the conversion story is actually complete, not a numeric-only demo. Phase 3 adds Parquet IO as its own end-to-end, user-facing capability against the now-complete Arrow core. Phase 4 closes the loop: benchmark the core value claim against pyarrow across a realistic matrix, and package/ship it so it's actually installable and trustworthy for the open-source audience it targets.
 
 ## Phases
 

@@ -2,7 +2,7 @@
 
 ## Project
 
-**Flint (placeholder name)**
+**pydart**
 
 A Rust-backed Python library for Arrow-format-compatible columnar data — a leaner, lower-level alternative to pyarrow focused specifically on eliminating the memory-copy overhead of pandas <-> Arrow conversion. It's for the open source community: Python/data users who feel pyarrow's conversion overhead and want a faster, more focused interop layer rather than a full DataFrame engine like Polars.
 
