@@ -3,23 +3,23 @@ requires = ["maturin>=1.14,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "flint"
+name = "pydart"
 version = "0.1.0"
 description = "A Rust-backed, zero-copy pandas <-> Arrow interop layer (leaner than pyarrow)."
 # NOTE: RESEARCH.md pins numpy==2.5.1 as a dev/test dependency, which requires Python>=3.12;
 # uv's resolver requires requires-python to cover every declared dependency (dev included), so
 # this floor tracks the dev-dependency set actually installed in this environment. The shipped
-# wheel's abi3-py39 build target (crates/flint-python's `abi3-py39` PyO3 feature) is a separate,
+# wheel's abi3-py39 build target (crates/pydart-python's `abi3-py39` PyO3 feature) is a separate,
 # broader compatibility floor for consumers and is unaffected by this dev-environment constraint.
 requires-python = ">=3.12"
 license = { text = "MIT OR Apache-2.0" }
 # Runtime dependencies intentionally empty: pyarrow/polars/duckdb/pandas are dev/test-only
-# (see .claude/CLAUDE.md "What NOT to Use" — flint must stay leaner than pyarrow).
+# (see .claude/CLAUDE.md "What NOT to Use" — pydart must stay leaner than pyarrow).
 dependencies = []
 
 [tool.maturin]
-manifest-path = "crates/flint-python/Cargo.toml"
-module-name = "flint._flint"
+manifest-path = "crates/pydart-python/Cargo.toml"
+module-name = "pydart._pydart"
 python-source = "python"
 features = ["pyo3/extension-module"]
 

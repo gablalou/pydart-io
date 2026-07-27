@@ -4,9 +4,9 @@ crates/*/target/
 
 # maturin develop (editable install) drops the compiled extension module directly into the
 # python-source tree — this is a build artifact, not source.
-python/flint/*.so
-python/flint/*.pyd
-python/flint/*.dylib
+python/pydart/*.so
+python/pydart/*.pyd
+python/pydart/*.dylib
 
 # Python virtual environment (uv-managed)
 .venv/

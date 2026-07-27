@@ -13,7 +13,7 @@ addition to `plan_column`/`classify_dtype`:
   an honest copy, reported as `zero_copy=False` with a reason mentioning the object dtype has
   no Arrow-compatible physical layout (D-10).
 - Any object-dtype column containing a non-`str`, non-null value is rejected with a
-  Flint-owned `flint.FlintError` naming the column and the offending value's type -- proven
+  Pydart-owned `pydart.PydartError` naming the column and the offending value's type -- proven
   against dict-valued, all-int, and BOTH orderings of a genuinely mixed-type column, since
   pyarrow's own inference behaves differently (silently, or with a different exception type)
   across all four of these cases (D-11 / RESEARCH.md Pitfall 2).
@@ -24,7 +24,7 @@ import pandas.testing as pdt
 import pyarrow as pa
 import pytest
 
-import flint
+import pydart
 
 
 def test_arrow_dtype_string_round_trips_zero_copy():
@@ -33,7 +33,7 @@ def test_arrow_dtype_string_round_trips_zero_copy():
     already Arrow memory)."""
     df = pd.DataFrame({"a": pd.array(["x", None, "z"], dtype=pd.ArrowDtype(pa.string()))})
 
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     result = table.to_pandas()
 
     pdt.assert_frame_equal(result, df)
@@ -52,7 +52,7 @@ def test_numpy_object_string_round_trips_via_copy():
     dtype has no Arrow-compatible physical layout."""
     df = pd.DataFrame({"a": pd.Series(["x", None, "z"], dtype=object)})
 
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     result = table.to_pandas()
 
     assert result["a"][0] == "x"
@@ -71,8 +71,8 @@ def test_object_column_of_ints_rejected():
     is closed, not silently converted."""
     df = pd.DataFrame({"numbers": pd.Series([1, 2, 3], dtype=object)})
 
-    with pytest.raises(flint.FlintError) as exc_info:
-        flint.Table.from_pandas(df)
+    with pytest.raises(pydart.PydartError) as exc_info:
+        pydart.Table.from_pandas(df)
 
     message = str(exc_info.value)
     assert "numbers" in message
@@ -84,8 +84,8 @@ def test_object_column_of_dicts_rejected():
     (Pitfall 2) is closed, not silently converted."""
     df = pd.DataFrame({"records": pd.Series([{"a": 1}, {"b": 2}], dtype=object)})
 
-    with pytest.raises(flint.FlintError) as exc_info:
-        flint.Table.from_pandas(df)
+    with pytest.raises(pydart.PydartError) as exc_info:
+        pydart.Table.from_pandas(df)
 
     message = str(exc_info.value)
     assert "records" in message
@@ -93,12 +93,12 @@ def test_object_column_of_dicts_rejected():
 
 
 def test_object_column_mixed_str_then_int_rejected():
-    """D-11: ['a', 123, None] is rejected as a Flint-owned flint.FlintError naming the
+    """D-11: ['a', 123, None] is rejected as a Pydart-owned pydart.PydartError naming the
     offending int -- not a bare pyarrow ArrowTypeError/ArrowInvalid."""
     df = pd.DataFrame({"mixed": pd.Series(["a", 123, None], dtype=object)})
 
-    with pytest.raises(flint.FlintError) as exc_info:
-        flint.Table.from_pandas(df)
+    with pytest.raises(pydart.PydartError) as exc_info:
+        pydart.Table.from_pandas(df)
 
     message = str(exc_info.value)
     assert "mixed" in message
@@ -106,14 +106,14 @@ def test_object_column_mixed_str_then_int_rejected():
 
 
 def test_object_column_mixed_int_then_str_rejected():
-    """D-11: [123, 'a', None] (the OTHER ordering) is ALSO rejected as a Flint-owned
-    flint.FlintError naming the offending int -- proves the rejection is order-independent,
+    """D-11: [123, 'a', None] (the OTHER ordering) is ALSO rejected as a Pydart-owned
+    pydart.PydartError naming the offending int -- proves the rejection is order-independent,
     unlike pyarrow's own inference (which raises two DIFFERENT exception types depending on
     ordering, per RESEARCH.md Pitfall 2)."""
     df = pd.DataFrame({"mixed": pd.Series([123, "a", None], dtype=object)})
 
-    with pytest.raises(flint.FlintError) as exc_info:
-        flint.Table.from_pandas(df)
+    with pytest.raises(pydart.PydartError) as exc_info:
+        pydart.Table.from_pandas(df)
 
     message = str(exc_info.value)
     assert "mixed" in message
@@ -127,7 +127,7 @@ def test_empty_object_column_converts_without_error():
     asserts the no-error, no-rows contract, not a specific Arrow type."""
     df = pd.DataFrame({"a": pd.Series([], dtype=object)})
 
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     result = table.to_pandas()
 
     assert len(result) == 0
@@ -141,7 +141,7 @@ def test_all_none_object_column_converts_without_error():
     not a specific Arrow type."""
     df = pd.DataFrame({"a": pd.Series([None, None, None], dtype=object)})
 
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     result = table.to_pandas()
 
     assert len(result) == 3

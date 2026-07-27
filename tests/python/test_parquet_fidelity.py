@@ -1,16 +1,16 @@
 """PARQ-06: Parquet round-trip preserves logical-type fidelity end-to-end -- categorical/
 dictionary encoding (with the `ordered` flag) and exact tz-aware timestamp zone strings -- through
-the full `flint.Table` -> Parquet -> `flint.Table` path, across the complete Phase 1-2 established
+the full `pydart.Table` -> Parquet -> `pydart.Table` path, across the complete Phase 1-2 established
 dtype range.
 
 Depends on the WR-01 fix (Task 1 of this plan): PARQ-06 schema fidelity must be validated against
 a CORRECT nullability signal, not the pre-fix `array.null_count() > 0` derivation. Plan 01's
 Wave-0 A6 gate (`tests/rust/parquet_dictionary_tz_roundtrip.rs`) already proved the underlying
 arrow-rs `ARROW:schema` mechanism preserves `DataType::Dictionary`/tz strings at the bare-arrow-rs
-level -- this file proves the SAME fidelity holds through Flint's own `Table`<->pyarrow
+level -- this file proves the SAME fidelity holds through Pydart's own `Table`<->pyarrow
 construction path (from_pandas -> to_parquet -> from_parquet -> to_pandas), which is a separate
 concern from the underlying arrow-rs mechanism. A failure here despite Plan 01's passing A6 gate
-would point at the `flint.Table`<->pyarrow construction path, not the `ARROW:schema` mechanism
+would point at the `pydart.Table`<->pyarrow construction path, not the `ARROW:schema` mechanism
 itself.
 
 KNOWN GAP (accepted, documented -- see 03-04-SUMMARY.md "Known Gap" section): arrow-rs's
@@ -18,7 +18,7 @@ KNOWN GAP (accepted, documented -- see 03-04-SUMMARY.md "Known Gap" section): ar
 drops categories that appear in zero rows. This means a categorical's `.cat.categories` ORDER, and
 any UNUSED categories, do NOT survive a Parquet round-trip -- even though `DataType::Dictionary`,
 `dict_is_ordered`, and every row's actual value ARE preserved correctly. Confirmed via a pure
-arrow-rs/parquet probe independent of Flint code; no `WriterProperties` knob controls this in
+arrow-rs/parquet probe independent of Pydart code; no `WriterProperties` knob controls this in
 parquet 59.1.0; pyarrow does NOT have this limitation (a genuine arrow-rs-vs-pyarrow divergence,
 not a Parquet format limitation). The tests below assert what IS actually guaranteed
 (dictionary-ness, ordered flag, per-row values) and deliberately do NOT assert exact
@@ -28,7 +28,7 @@ not a Parquet format limitation). The tests below assert what IS actually guaran
 import pandas as pd
 import pyarrow as pa
 
-import flint
+import pydart
 
 
 def test_ordered_categorical_dictionary_survives_parquet_round_trip(tmp_path):
@@ -39,11 +39,11 @@ def test_ordered_categorical_dictionary_survives_parquet_round_trip(tmp_path):
     NOT asserted here -- only that the same set of used categories is present."""
     source = pd.Categorical(["b", "a", "c", "a"], categories=["c", "b", "a"], ordered=True)
     df = pd.DataFrame({"cat": source})
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
 
     path = tmp_path / "ordered_cat.parquet"
     table.to_parquet(path)
-    result = flint.Table.from_parquet(path)
+    result = pydart.Table.from_parquet(path)
 
     # Assert the ARROW-LEVEL type is still a dictionary (not decoded to plain values) BEFORE
     # even reconstructing pandas -- the direct RESEARCH.md Pitfall 1 assertion shape.
@@ -67,11 +67,11 @@ def test_unordered_categorical_dictionary_survives_parquet_round_trip(tmp_path):
     Category order is not asserted (documented gap, cosmetic for unordered categoricals)."""
     source = pd.Categorical(["z", "a", "m"], categories=["z", "m", "a"], ordered=False)
     df = pd.DataFrame({"cat": source})
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
 
     path = tmp_path / "unordered_cat.parquet"
     table.to_parquet(path)
-    result = flint.Table.from_parquet(path)
+    result = pydart.Table.from_parquet(path)
 
     pa_table = pa.table(result)
     field = pa_table.schema.field("cat")
@@ -97,11 +97,11 @@ def test_ordered_categorical_category_order_not_guaranteed_known_gap(tmp_path):
     # Original order c < b < a. First-occurrence-in-rows order is b, a, c.
     source = pd.Categorical(["b", "a", "c", "a"], categories=["c", "b", "a"], ordered=True)
     df = pd.DataFrame({"cat": source})
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
 
     path = tmp_path / "ordered_cat_order_gap.parquet"
     table.to_parquet(path)
-    result_df = flint.Table.from_parquet(path).to_pandas()
+    result_df = pydart.Table.from_parquet(path).to_pandas()
 
     # The `ordered` flag itself is preserved...
     assert result_df["cat"].cat.ordered is True
@@ -116,11 +116,11 @@ def test_single_category_dictionary_round_trip(tmp_path):
     possible with only one category)."""
     source = pd.Categorical(["only", "only", "only"], categories=["only"], ordered=False)
     df = pd.DataFrame({"cat": source})
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
 
     path = tmp_path / "single_category.parquet"
     table.to_parquet(path)
-    result_df = flint.Table.from_parquet(path).to_pandas()
+    result_df = pydart.Table.from_parquet(path).to_pandas()
 
     assert result_df["cat"].dtype == "category"
     assert list(result_df["cat"].cat.categories) == ["only"]
@@ -136,11 +136,11 @@ def test_multi_category_dictionary_round_trip(tmp_path):
     categories = [f"c{i}" for i in range(300)]
     source = pd.Categorical(["c0", "c299", "c150"], categories=categories, ordered=False)
     df = pd.DataFrame({"cat": source})
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
 
     path = tmp_path / "multi_category.parquet"
     table.to_parquet(path)
-    result = flint.Table.from_parquet(path)
+    result = pydart.Table.from_parquet(path)
 
     pa_table = pa.table(result)
     field = pa_table.schema.field("cat")
@@ -166,11 +166,11 @@ def test_tz_aware_timestamp_exact_zone_survives_parquet_round_trip(tmp_path):
     )
     df = pd.DataFrame({"ts": pd.Series(source)})
     assert str(df["ts"].dtype.tz) == "America/New_York"
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
 
     path = tmp_path / "tz.parquet"
     table.to_parquet(path)
-    result_df = flint.Table.from_parquet(path).to_pandas()
+    result_df = pydart.Table.from_parquet(path).to_pandas()
 
     assert str(result_df["ts"].dtype.pyarrow_dtype.tz) == "America/New_York"
     assert result_df["ts"].tolist() == df["ts"].tolist()
@@ -191,11 +191,11 @@ def test_timestamp_boundary_and_ns_precision(tmp_path):
         .as_unit("ns")
     )
     df = pd.DataFrame({"ts": pd.Series(source)})
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
 
     path = tmp_path / "boundary_ns.parquet"
     table.to_parquet(path)
-    result_df = flint.Table.from_parquet(path).to_pandas()
+    result_df = pydart.Table.from_parquet(path).to_pandas()
 
     assert str(result_df["ts"].dtype.pyarrow_dtype.tz) == "America/New_York"
     assert result_df["ts"].dtype.pyarrow_dtype.unit == "ns"
@@ -203,7 +203,7 @@ def test_timestamp_boundary_and_ns_precision(tmp_path):
 
 
 def test_full_dtype_matrix_parquet_round_trip(tmp_path):
-    """Phase-completing check: a single flint.Table combining the COMPLETE Phase 1-2
+    """Phase-completing check: a single pydart.Table combining the COMPLETE Phase 1-2
     established dtype range -- numeric-with-nulls (CONV-03), string (CONV-04), categorical/
     ordered (CONV-05), tz-aware timestamp (CONV-06), plain non-tz datetime64[ns] (CONV-06), and
     timedelta64[ns]/Duration (CONV-07) -- round-trips through to_parquet/from_parquet. Plain
@@ -244,10 +244,10 @@ def test_full_dtype_matrix_parquet_round_trip(tmp_path):
         }
     )
 
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     path = tmp_path / "full_matrix.parquet"
     table.to_parquet(path)
-    result_df = flint.Table.from_parquet(path).to_pandas()
+    result_df = pydart.Table.from_parquet(path).to_pandas()
 
     # Non-categorical columns: per-row value equality (not a blanket assert_frame_equal -- see
     # docstring for why dtype *backend* legitimately differs for numpy-sourced columns).
@@ -263,7 +263,7 @@ def test_full_dtype_matrix_parquet_round_trip(tmp_path):
 
     # Fidelity-load-bearing assertions beyond plain equality (dictionary-ness + exact tz survive,
     # not just values that happen to compare equal).
-    pa_table = pa.table(flint.Table.from_parquet(path))
+    pa_table = pa.table(pydart.Table.from_parquet(path))
     cat_field = pa_table.schema.field("cat")
     assert pa.types.is_dictionary(cat_field.type)
     assert cat_field.type.ordered is True

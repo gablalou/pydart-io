@@ -3,7 +3,7 @@ nullability (threaded from `import_column_via_pandas_stream`'s schema), NOT from
 `array.null_count() > 0` (02-REVIEW.md WR-01).
 
 Before this fix, an `int64[pyarrow]` column that happened to contain zero nulls round-tripped as
-a `not null` Flint schema field, which broke `pyarrow.concat_tables` against a genuinely-nullable
+a `not null` Pydart schema field, which broke `pyarrow.concat_tables` against a genuinely-nullable
 sibling batch of the same logical column (`ArrowInvalid: Schema ... was different`). Both tests
 below are the direct, concrete reproductions from 02-REVIEW.md -- a generic "schema matches"
 assertion would NOT catch this (it only breaks on `nullable` specifically, not on any other
@@ -21,7 +21,7 @@ regress any existing test.
 import pandas as pd
 import pyarrow as pa
 
-import flint
+import pydart
 
 
 def test_nullable_arrow_dtype_zero_nulls_round_trips_as_nullable_field():
@@ -31,7 +31,7 @@ def test_nullable_arrow_dtype_zero_nulls_round_trips_as_nullable_field():
     df = pd.DataFrame({"a": pd.array([1, 2, 3], dtype="int64[pyarrow]")})
     assert pa.table(df).schema.field("a").nullable is True  # source dtype is nullable
 
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     pa_table = pa.table(table)
 
     assert pa_table.schema.field("a").nullable is True
@@ -45,8 +45,8 @@ def test_concat_tables_across_zero_null_and_nullable_sibling():
     df_dense = pd.DataFrame({"a": pd.array([1, 2, 3], dtype="int64[pyarrow]")})
     df_with_null = pd.DataFrame({"a": pd.array([4, None, 6], dtype="int64[pyarrow]")})
 
-    t1 = pa.table(flint.Table.from_pandas(df_dense))
-    t2 = pa.table(flint.Table.from_pandas(df_with_null))
+    t1 = pa.table(pydart.Table.from_pandas(df_dense))
+    t2 = pa.table(pydart.Table.from_pandas(df_with_null))
 
     # Must not raise pyarrow.lib.ArrowInvalid -- this is the exact reproduction from
     # 02-REVIEW.md WR-01, which failed before the fix with a nullable/not-null schema mismatch.

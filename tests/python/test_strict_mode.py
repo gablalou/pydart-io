@@ -10,7 +10,7 @@ and pre-flight over the same `plan_column` decision `copy_report()` reads (see
 import pandas as pd
 import pytest
 
-import flint
+import pydart
 
 
 def test_strict_mode_succeeds_on_numeric_and_arrow_dtype_bool():
@@ -23,7 +23,7 @@ def test_strict_mode_succeeds_on_numeric_and_arrow_dtype_bool():
         }
     )
 
-    table = flint.Table.from_pandas(df, strict=True)
+    table = pydart.Table.from_pandas(df, strict=True)
 
     assert table.to_pandas().shape == df.shape
 
@@ -36,25 +36,25 @@ def test_strict_mode_rejects_numpy_backed_bool_column():
         }
     )
 
-    with pytest.raises(flint.ZeroCopyRequiredError) as exc_info:
-        flint.Table.from_pandas(df, strict=True)
+    with pytest.raises(pydart.ZeroCopyRequiredError) as exc_info:
+        pydart.Table.from_pandas(df, strict=True)
 
     message = str(exc_info.value)
     assert "flag" in message
     assert "bool" in message
 
 
-def test_strict_mode_rejection_is_catchable_as_flint_error():
+def test_strict_mode_rejection_is_catchable_as_pydart_error():
     df = pd.DataFrame({"flag": pd.Series([True, False], dtype=bool)})
 
-    with pytest.raises(flint.FlintError):
-        flint.Table.from_pandas(df, strict=True)
+    with pytest.raises(pydart.PydartError):
+        pydart.Table.from_pandas(df, strict=True)
 
 
 def test_non_strict_mode_converts_numpy_bool_with_copy_and_does_not_raise():
     df = pd.DataFrame({"flag": pd.Series([True, False, True], dtype=bool)})
 
-    table = flint.Table.from_pandas(df)  # strict=False (default)
+    table = pydart.Table.from_pandas(df)  # strict=False (default)
     result = table.to_pandas()
 
     assert result["flag"].tolist() == df["flag"].tolist()

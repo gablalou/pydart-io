@@ -7,7 +7,7 @@ restructure:
   positions preserved -- this already worked mechanically via Phase 1's `__arrow_c_stream__`
   import; this file proves it with tests (D-07).
 - A pandas masked nullable extension column (`Int64`/`boolean`, capital-letter `pd.NA`-backed) is
-  now rejected with an honest `flint.FlintError` naming the column and its concrete dtype type
+  now rejected with an honest `pydart.PydartError` naming the column and its concrete dtype type
   name, instead of the raw `AttributeError: '...Array' object has no attribute 'flags'` crash
   fixed by this plan (D-08 / RESEARCH.md Pitfall 1).
 - A plain numpy `float64` column containing `NaN` stays on the unchanged Phase 1 zero-copy numeric
@@ -21,14 +21,14 @@ import pandas as pd
 import pandas.testing as pdt
 import pytest
 
-import flint
+import pydart
 
 
 def test_nullable_arrow_dtype_int_round_trips_with_nulls_preserved():
     """D-07: int64[pyarrow] with a real pd.NA null round-trips, null position preserved."""
     df = pd.DataFrame({"a": pd.array([1, None, 3], dtype="int64[pyarrow]")})
 
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     result = table.to_pandas()
 
     pdt.assert_frame_equal(result, df)
@@ -41,7 +41,7 @@ def test_nullable_arrow_dtype_float_round_trips_with_nulls_preserved():
     """D-07: float64[pyarrow] with a None null round-trips, null position preserved."""
     df = pd.DataFrame({"a": pd.array([1.5, None, 3.5], dtype="float64[pyarrow]")})
 
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     result = table.to_pandas()
 
     pdt.assert_frame_equal(result, df)
@@ -50,8 +50,8 @@ def test_nullable_arrow_dtype_float_round_trips_with_nulls_preserved():
     assert result["a"][2] == 3.5
 
 
-def test_masked_int64_extension_dtype_rejected_with_flint_error():
-    """D-08 / Pitfall 1: masked (capital-I) Int64 is rejected with an honest flint.FlintError
+def test_masked_int64_extension_dtype_rejected_with_pydart_error():
+    """D-08 / Pitfall 1: masked (capital-I) Int64 is rejected with an honest pydart.PydartError
     naming the column and dtype -- NOT the raw AttributeError this used to crash with."""
     df = pd.DataFrame(
         {
@@ -60,8 +60,8 @@ def test_masked_int64_extension_dtype_rejected_with_flint_error():
         }
     )
 
-    with pytest.raises(flint.FlintError) as exc_info:
-        flint.Table.from_pandas(df)
+    with pytest.raises(pydart.PydartError) as exc_info:
+        pydart.Table.from_pandas(df)
 
     assert not isinstance(exc_info.value, AttributeError)
     message = str(exc_info.value)
@@ -69,7 +69,7 @@ def test_masked_int64_extension_dtype_rejected_with_flint_error():
     assert "Int64" in message
 
 
-def test_masked_boolean_extension_dtype_rejected_with_flint_error():
+def test_masked_boolean_extension_dtype_rejected_with_pydart_error():
     """D-08 / Pitfall 1: masked `boolean` dtype is rejected the same honest way as `Int64`."""
     df = pd.DataFrame(
         {
@@ -78,8 +78,8 @@ def test_masked_boolean_extension_dtype_rejected_with_flint_error():
         }
     )
 
-    with pytest.raises(flint.FlintError) as exc_info:
-        flint.Table.from_pandas(df)
+    with pytest.raises(pydart.PydartError) as exc_info:
+        pydart.Table.from_pandas(df)
 
     assert not isinstance(exc_info.value, AttributeError)
     message = str(exc_info.value)
@@ -93,7 +93,7 @@ def test_numpy_float64_nan_is_not_treated_as_null():
     reason=None)."""
     df = pd.DataFrame({"a": pd.Series([1.0, float("nan"), 3.0], dtype="float64")})
 
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     result = table.to_pandas()
 
     assert result["a"][0] == 1.0

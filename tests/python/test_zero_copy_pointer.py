@@ -6,7 +6,7 @@ the Rust test proves the conversion path makes no heap allocation for the data b
 alone proves zero-copy -- both must pass.
 
 Forward direction (CONV-01): a source pandas column's data-buffer address is captured BEFORE
-`flint.Table.from_pandas(df)`, then compared for EXACT equality against `table.buffer_address(i)`
+`pydart.Table.from_pandas(df)`, then compared for EXACT equality against `table.buffer_address(i)`
 -- same physical memory, not just equal values. Covers both:
   - a numpy-backed int64 column (`values.ctypes.data`, RESEARCH.md line 90-94), and
   - an `int64[pyarrow]` (ArrowDtype) column (the Arrow buffer's own `.address`, RESEARCH.md
@@ -27,7 +27,7 @@ address is only meaningful while the owning array is alive).
 
 import pandas as pd
 
-import flint
+import pydart
 
 
 def _arrow_dtype_column_buffer_address(series: pd.Series) -> int:
@@ -52,11 +52,11 @@ def test_from_pandas_forward_zero_copy_pointer_identity_numpy_numeric():
     df = pd.DataFrame({"a": pd.Series([1, 2, 3], dtype="int64")})
     # Keep a live reference to the source array for the whole comparison (RESEARCH.md line 451):
     # `series.values` is the same numpy ndarray `from_pandas`'s borrow path reads from
-    # (crates/flint-python/src/pandas.rs `borrow_numpy_numeric_column`), not a fresh copy.
+    # (crates/pydart-python/src/pandas.rs `borrow_numpy_numeric_column`), not a fresh copy.
     source_array = df["a"].values
     original_address = source_array.ctypes.data
 
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     exported_address = table.buffer_address(0)
 
     assert exported_address == original_address, (
@@ -73,7 +73,7 @@ def test_from_pandas_forward_zero_copy_pointer_identity_arrow_dtype():
     source_series = df["a"]
     original_address = _arrow_dtype_column_buffer_address(source_series)
 
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     exported_address = table.buffer_address(0)
 
     assert exported_address == original_address, (
@@ -89,7 +89,7 @@ def test_to_pandas_reverse_zero_copy_pointer_identity():
     reference. The resulting pandas column's data-buffer address must EXACTLY match the source
     `Table`'s `buffer_address(0)` -- proving the shipping reverse mechanism, not an assumed one."""
     df = pd.DataFrame({"a": pd.array([1, 2, 3], dtype="int64[pyarrow]")})
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     table_address = table.buffer_address(0)
 
     result = table.to_pandas()
@@ -111,7 +111,7 @@ def test_from_pandas_fails_loudly_if_a_copy_is_introduced():
     unrelated_source_array = df_two["a"].values
     unrelated_address = unrelated_source_array.ctypes.data
 
-    table = flint.Table.from_pandas(df_one)
+    table = pydart.Table.from_pandas(df_one)
     exported_address = table.buffer_address(0)
 
     assert exported_address != unrelated_address, (

@@ -28,7 +28,7 @@ intentional, documented copy, not surfaced in `copy_report()`.
 import pandas as pd
 import pyarrow as pa
 
-import flint
+import pydart
 
 
 def test_ordered_categorical_round_trips_as_real_categorical():
@@ -39,7 +39,7 @@ def test_ordered_categorical_round_trips_as_real_categorical():
     )
     df = pd.DataFrame({"cat": source})
 
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     result = table.to_pandas()
 
     assert result["cat"].dtype == "category"
@@ -57,7 +57,7 @@ def test_unordered_categorical_preserves_category_definition_order():
     )
     df = pd.DataFrame({"cat": source})
 
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     result = table.to_pandas()
 
     assert result["cat"].dtype == "category"
@@ -73,7 +73,7 @@ def test_categorical_code_width_int8_preserved():
     df = pd.DataFrame({"cat": source})
     assert df["cat"].cat.codes.dtype == "int8"
 
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     result = table.to_pandas()
 
     assert result["cat"].cat.codes.dtype == "int8"
@@ -82,13 +82,13 @@ def test_categorical_code_width_int8_preserved():
 def test_categorical_code_width_int16_preserved():
     """D-18: a >255-category categorical's int16 code width survives the round trip
     unchanged -- pandas automatically widens beyond int8 once a column has more than 255
-    categories, and Flint must not normalize this back down to int8 or up to int32/int64."""
+    categories, and Pydart must not normalize this back down to int8 or up to int32/int64."""
     categories = [f"c{i}" for i in range(300)]
     source = pd.Categorical(["c0", "c299", "c150"], categories=categories, ordered=False)
     df = pd.DataFrame({"cat": source})
     assert df["cat"].cat.codes.dtype == "int16"
 
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     result = table.to_pandas()
 
     assert result["cat"].cat.codes.dtype == "int16"
@@ -98,14 +98,14 @@ def test_categorical_code_width_int16_preserved():
 
 def test_from_pandas_preserves_ordered_flag_before_to_pandas():
     """D-17 / Pitfall 3 root-cause pin: convert an ordered=True Categorical via
-    flint.Table.from_pandas and export DIRECTLY via pa.table(flint_table) (PyCapsule, NO
+    pydart.Table.from_pandas and export DIRECTLY via pa.table(pydart_table) (PyCapsule, NO
     to_pandas call at all) -- the exported schema's dictionary field must already report
     ordered=True. This isolates the fix to from_pandas's own Field construction, independent
     of whatever to_pandas's types_mapper does."""
     source = pd.Categorical(["x", "y"], categories=["y", "x"], ordered=True)
     df = pd.DataFrame({"cat": source})
 
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     pa_table = pa.table(table)
 
     field = pa_table.schema.field("cat")
@@ -123,7 +123,7 @@ def test_categorical_reconstruction_copy_is_documented():
     source = pd.Categorical(["a", "b"], ordered=False)
     df = pd.DataFrame({"cat": source})
 
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
 
     # Must not raise: OQ1's recorded decision is that strict stays a no-op for to_pandas even
     # though the categorical reconstruction is an intentional, documented copy.

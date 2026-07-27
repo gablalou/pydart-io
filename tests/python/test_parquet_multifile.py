@@ -6,10 +6,10 @@ deterministic row order.
 - A directory reads only its `.parquet` files, sorted lexicographically by filename (D-21
   ordering edge, deterministic).
 - A single-element list behaves identically to passing that one path (D-21 empty/single edge).
-- A schema mismatch across files raises `flint.FlintError` (`FlintError::ParquetSchemaMismatch`)
+- A schema mismatch across files raises `pydart.PydartError` (`PydartError::ParquetSchemaMismatch`)
   naming the first file, the mismatched file, and the offending column -- NEVER a silent
   best-effort union/merge (D-21 discretion, strict-match-required v1 default).
-- An empty directory (no `.parquet` files) or an empty path list raises `flint.FlintError`
+- An empty directory (no `.parquet` files) or an empty path list raises `pydart.PydartError`
   rather than silently returning an empty `Table` (D-21 empty edge).
 """
 
@@ -17,7 +17,7 @@ import pandas as pd
 import pandas.testing as pdt
 import pytest
 
-import flint
+import pydart
 
 
 def _frame(a_values, b_values) -> pd.DataFrame:
@@ -35,13 +35,13 @@ def test_list_of_paths_concatenates_in_given_order(tmp_path):
 
     path1 = tmp_path / "b_second.parquet"
     path2 = tmp_path / "a_first.parquet"
-    flint.Table.from_pandas(df1).to_parquet(path1)
-    flint.Table.from_pandas(df2).to_parquet(path2)
+    pydart.Table.from_pandas(df1).to_parquet(path1)
+    pydart.Table.from_pandas(df2).to_parquet(path2)
 
     # Pass path1 (lexicographically LATER) before path2 -- the concatenation must follow the
     # LIST order given, not directory/lexicographic order (that's the directory-mode behavior
     # tested separately below).
-    result = flint.Table.from_parquet([path1, path2]).to_pandas()
+    result = pydart.Table.from_parquet([path1, path2]).to_pandas()
 
     expected = pd.concat([df1, df2], ignore_index=True)
     pdt.assert_frame_equal(result, expected)
@@ -53,13 +53,13 @@ def test_directory_reads_only_parquet_files_sorted_lexicographically(tmp_path):
     df_c = _frame([3], [3.0])
 
     # Write out of lexicographic order to prove the read sorts, not preserves creation order.
-    flint.Table.from_pandas(df_c).to_parquet(tmp_path / "c.parquet")
-    flint.Table.from_pandas(df_a).to_parquet(tmp_path / "a.parquet")
-    flint.Table.from_pandas(df_b).to_parquet(tmp_path / "b.parquet")
+    pydart.Table.from_pandas(df_c).to_parquet(tmp_path / "c.parquet")
+    pydart.Table.from_pandas(df_a).to_parquet(tmp_path / "a.parquet")
+    pydart.Table.from_pandas(df_b).to_parquet(tmp_path / "b.parquet")
     # A non-.parquet file in the same directory must be silently EXCLUDED, not read/erroring.
     (tmp_path / "notes.txt").write_text("not a parquet file")
 
-    result = flint.Table.from_parquet(tmp_path).to_pandas()
+    result = pydart.Table.from_parquet(tmp_path).to_pandas()
 
     expected = pd.concat([df_a, df_b, df_c], ignore_index=True)
     pdt.assert_frame_equal(result, expected)
@@ -68,28 +68,28 @@ def test_directory_reads_only_parquet_files_sorted_lexicographically(tmp_path):
 def test_single_element_list_behaves_identically_to_single_path(tmp_path):
     df = _frame([1, 2, 3], [1.5, 2.5, 3.5])
     path = tmp_path / "single.parquet"
-    flint.Table.from_pandas(df).to_parquet(path)
+    pydart.Table.from_pandas(df).to_parquet(path)
 
-    via_single_path = flint.Table.from_parquet(path).to_pandas()
-    via_single_element_list = flint.Table.from_parquet([path]).to_pandas()
+    via_single_path = pydart.Table.from_parquet(path).to_pandas()
+    via_single_element_list = pydart.Table.from_parquet([path]).to_pandas()
 
     pdt.assert_frame_equal(via_single_path, via_single_element_list)
     pdt.assert_frame_equal(via_single_element_list, df)
 
 
 def test_schema_mismatch_across_files_raises_named_error(tmp_path):
-    """D-21: files with disagreeing schemas raise flint.FlintError naming the mismatched file
+    """D-21: files with disagreeing schemas raise pydart.PydartError naming the mismatched file
     and column -- NOT a silently merged/unioned Table."""
     matching = _frame([1, 2], [1.0, 2.0])
     mismatched = pd.DataFrame({"a": pd.array([1, 2], dtype="int64[pyarrow]")})  # missing "b"
 
     path1 = tmp_path / "matching.parquet"
     path2 = tmp_path / "mismatched.parquet"
-    flint.Table.from_pandas(matching).to_parquet(path1)
-    flint.Table.from_pandas(mismatched).to_parquet(path2)
+    pydart.Table.from_pandas(matching).to_parquet(path1)
+    pydart.Table.from_pandas(mismatched).to_parquet(path2)
 
-    with pytest.raises(flint.FlintError) as exc_info:
-        flint.Table.from_parquet([path1, path2])
+    with pytest.raises(pydart.PydartError) as exc_info:
+        pydart.Table.from_parquet([path1, path2])
 
     message = str(exc_info.value)
     assert str(path1) in message or "matching.parquet" in message
@@ -105,11 +105,11 @@ def test_schema_mismatch_different_dtype_raises_named_error(tmp_path):
 
     path1 = tmp_path / "int_a.parquet"
     path2 = tmp_path / "float_a.parquet"
-    flint.Table.from_pandas(df1).to_parquet(path1)
-    flint.Table.from_pandas(df2).to_parquet(path2)
+    pydart.Table.from_pandas(df1).to_parquet(path1)
+    pydart.Table.from_pandas(df2).to_parquet(path2)
 
-    with pytest.raises(flint.FlintError) as exc_info:
-        flint.Table.from_parquet([path1, path2])
+    with pytest.raises(pydart.PydartError) as exc_info:
+        pydart.Table.from_parquet([path1, path2])
 
     assert "a" in str(exc_info.value)
 
@@ -118,25 +118,25 @@ def test_empty_directory_raises_error_not_silent_empty_table(tmp_path):
     empty_dir = tmp_path / "empty"
     empty_dir.mkdir()
 
-    with pytest.raises(flint.FlintError):
-        flint.Table.from_parquet(empty_dir)
+    with pytest.raises(pydart.PydartError):
+        pydart.Table.from_parquet(empty_dir)
 
 
 def test_empty_path_list_raises_error_not_silent_empty_table():
-    with pytest.raises(flint.FlintError):
-        flint.Table.from_parquet([])
+    with pytest.raises(pydart.PydartError):
+        pydart.Table.from_parquet([])
 
 
 def test_nonexistent_path_in_list_raises_named_error(tmp_path):
     """D-21: a nonexistent path passed explicitly as a list element raises
-    FlintError::ParquetReadError, which routes through the builtin ValueError (matching the
-    existing Arrow/Other wrapped-IO-failure treatment) -- not flint.FlintError, which is
+    PydartError::ParquetReadError, which routes through the builtin ValueError (matching the
+    existing Arrow/Other wrapped-IO-failure treatment) -- not pydart.PydartError, which is
     reserved for caller-input-validation failures (empty list/directory, schema mismatch,
     unsupported codec/operator)."""
     missing = tmp_path / "does_not_exist.parquet"
 
     with pytest.raises(ValueError) as exc_info:
-        flint.Table.from_parquet([missing])
+        pydart.Table.from_parquet([missing])
 
     assert "does_not_exist.parquet" in str(exc_info.value)
 
@@ -148,10 +148,10 @@ def test_multifile_read_combinable_with_columns_and_filters(tmp_path):
     df2 = _frame([4, 5, 6], [40.0, 50.0, 60.0])
     path1 = tmp_path / "p1.parquet"
     path2 = tmp_path / "p2.parquet"
-    flint.Table.from_pandas(df1).to_parquet(path1)
-    flint.Table.from_pandas(df2).to_parquet(path2)
+    pydart.Table.from_pandas(df1).to_parquet(path1)
+    pydart.Table.from_pandas(df2).to_parquet(path2)
 
-    result = flint.Table.from_parquet(
+    result = pydart.Table.from_parquet(
         [path1, path2], columns=["a"], filters=[("a", ">", 2)]
     ).to_pandas()
 

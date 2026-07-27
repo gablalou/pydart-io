@@ -8,7 +8,7 @@ column-for-column agreement between the two features directly, not just that `co
 
 import pandas as pd
 
-import flint
+import pydart
 
 
 def _mixed_frame() -> pd.DataFrame:
@@ -24,7 +24,7 @@ def _mixed_frame() -> pd.DataFrame:
 
 def test_copy_report_returns_one_status_per_column():
     df = _mixed_frame()
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
 
     report = table.copy_report()
 
@@ -34,7 +34,7 @@ def test_copy_report_returns_one_status_per_column():
 
 def test_copy_report_marks_arrow_and_contiguous_numpy_numeric_as_zero_copy():
     df = _mixed_frame()
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
 
     report = {status.column: status for status in table.copy_report()}
 
@@ -48,7 +48,7 @@ def test_copy_report_marks_arrow_and_contiguous_numpy_numeric_as_zero_copy():
 
 def test_copy_report_marks_numpy_bool_as_requiring_a_copy_with_a_reason():
     df = _mixed_frame()
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
 
     report = {status.column: status for status in table.copy_report()}
 
@@ -61,16 +61,16 @@ def test_copy_report_agrees_with_strict_mode_rejection_per_column():
     """Single source of truth: copy_report()'s zero_copy=False columns are EXACTLY the columns
     that would make strict mode raise, and vice versa (T-01-05)."""
     df = _mixed_frame()
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     report = table.copy_report()
 
     non_zero_copy_columns = {status.column for status in report if not status.zero_copy}
 
     try:
-        flint.Table.from_pandas(df, strict=True)
+        pydart.Table.from_pandas(df, strict=True)
         strict_failed = False
         strict_failure_column = None
-    except flint.ZeroCopyRequiredError as exc:
+    except pydart.ZeroCopyRequiredError as exc:
         strict_failed = True
         strict_failure_column = next(
             (col for col in non_zero_copy_columns if col in str(exc)), None

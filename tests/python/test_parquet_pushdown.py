@@ -5,7 +5,7 @@ rows (D-26 -- no false positives AND no dropped matches), restricted to the requ
 the requested order (D-27/PARQ-05), with `columns`/`filters` independently combinable (D-27: a
 filter column need not be in the output projection). Multiple filter tuples combine with AND only
 (D-24 -- no OR/nested-list support). An operator string outside the fixed D-25 six-operator set
-raises `flint.FlintError` naming the column and operator, never a silently skipped tuple.
+raises `pydart.PydartError` naming the column and operator, never a silently skipped tuple.
 
 `test_operator_coverage_property` is the RESEARCH.md Assumption A3 discriminator: it compares a
 filtered `from_parquet` read against an unfiltered-read-then-pandas-filter baseline across all six
@@ -22,12 +22,12 @@ import pandas as pd
 import pandas.testing as pdt
 import pytest
 
-import flint
+import pydart
 
 _OPERATORS = ["==", "!=", "<", "<=", ">", ">="]
 
 # Baseline Python comparison for each D-25 operator string, used to build the
-# unfiltered-read-then-pandas-filter baseline the property test compares Flint's pushdown result
+# unfiltered-read-then-pandas-filter baseline the property test compares Pydart's pushdown result
 # against.
 _PY_OPS = {
     "==": operator.eq,
@@ -101,11 +101,11 @@ def _pruning_frame(n: int = 300) -> pd.DataFrame:
 def test_projection_returns_subset_in_order(tmp_path):
     """PARQ-05: columns=["c","a"] returns exactly columns c,a in that order (not schema order)."""
     df = _abc_frame(20)
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     path = tmp_path / "abc.parquet"
     table.to_parquet(str(path))
 
-    result = flint.Table.from_parquet(str(path), columns=["c", "a"])
+    result = pydart.Table.from_parquet(str(path), columns=["c", "a"])
     result_df = result.to_pandas()
 
     assert list(result_df.columns) == ["c", "a"]
@@ -117,11 +117,11 @@ def test_single_filter_returns_only_matching_rows(tmp_path):
     rows -- no false positives, no dropped matches."""
     n = 300
     df = _xy_frame(n)
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     path = tmp_path / "xy.parquet"
     table.to_parquet(str(path), row_group_size=100)
 
-    result = flint.Table.from_parquet(str(path), filters=[("x", ">", 5)]).to_pandas()
+    result = pydart.Table.from_parquet(str(path), filters=[("x", ">", 5)]).to_pandas()
     expected = df[df["x"] > 5].reset_index(drop=True)
 
     assert (result["x"] > 5).all()
@@ -133,11 +133,11 @@ def test_and_combination(tmp_path):
     """D-24: multiple filter tuples combine with AND only."""
     n = 300
     df = _xy_frame(n)
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     path = tmp_path / "xy_and.parquet"
     table.to_parquet(str(path), row_group_size=100)
 
-    result = flint.Table.from_parquet(
+    result = pydart.Table.from_parquet(
         str(path), filters=[("x", ">", 5), ("y", "==", 1)]
     ).to_pandas()
     expected = df[(df["x"] > 5) & (df["y"] == 1)].reset_index(drop=True)
@@ -153,11 +153,11 @@ def test_projection_and_filter_combinable_filter_col_not_projected(tmp_path):
     output; the reader decodes the filter-eval column separately from the output columns."""
     n = 50
     df = _ab_frame(n)
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     path = tmp_path / "ab.parquet"
     table.to_parquet(str(path), row_group_size=10)
 
-    result = flint.Table.from_parquet(
+    result = pydart.Table.from_parquet(
         str(path), columns=["a"], filters=[("b", "<", 10)]
     ).to_pandas()
     expected = df[df["b"] < 10][["a"]].reset_index(drop=True)
@@ -171,31 +171,31 @@ def test_projection_and_filter_combinable_filter_col_not_projected(tmp_path):
 @pytest.mark.parametrize("op", _OPERATORS)
 def test_operator_coverage_property(tmp_path, op, value):
     """RESEARCH.md Assumption A3 discriminator: for every (operator, boundary value) pair, compare
-    Flint's pushdown read against an unfiltered-read-then-pandas-filter baseline. Includes
+    Pydart's pushdown read against an unfiltered-read-then-pandas-filter baseline. Includes
     `min < value < max` (value=50, within group 0) and `min == max == value` (value=150, group 1 is
     entirely single-valued) for `!=` specifically -- the two cases that distinguish correct
     conservative pruning from over-pruning."""
     df = _pruning_frame()
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     path = tmp_path / "pruning.parquet"
     table.to_parquet(str(path), row_group_size=100)
 
-    result = flint.Table.from_parquet(str(path), filters=[("v", op, value)]).to_pandas()
+    result = pydart.Table.from_parquet(str(path), filters=[("v", op, value)]).to_pandas()
     expected = df[_PY_OPS[op](df["v"], value)].reset_index(drop=True)
 
     pdt.assert_frame_equal(result.reset_index(drop=True), expected)
 
 
 def test_unknown_operator_raises(tmp_path):
-    """D-25: an operator string outside the fixed six-operator set raises flint.FlintError naming
+    """D-25: an operator string outside the fixed six-operator set raises pydart.PydartError naming
     the column and operator -- never a silently skipped/ignored filter tuple."""
     df = _xy_frame(20)
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     path = tmp_path / "unknown_op.parquet"
     table.to_parquet(str(path))
 
-    with pytest.raises(flint.FlintError) as exc_info:
-        flint.Table.from_parquet(str(path), filters=[("x", "in", [1, 2])])
+    with pytest.raises(pydart.PydartError) as exc_info:
+        pydart.Table.from_parquet(str(path), filters=[("x", "in", [1, 2])])
 
     message = str(exc_info.value)
     assert "in" in message
@@ -206,19 +206,19 @@ def test_filter_on_stats_less_or_empty(tmp_path):
     """PARQ-04 edge: an empty (0-row) file returns 0 rows under any filter, and a filter matching
     nothing on a non-empty file returns a 0-row Table (not an error)."""
     empty_df = pd.DataFrame({"x": pd.array([], dtype="int64[pyarrow]")})
-    empty_table = flint.Table.from_pandas(empty_df)
+    empty_table = pydart.Table.from_pandas(empty_df)
     empty_path = tmp_path / "empty.parquet"
     empty_table.to_parquet(str(empty_path))
 
-    empty_result = flint.Table.from_parquet(str(empty_path), filters=[("x", ">", 5)]).to_pandas()
+    empty_result = pydart.Table.from_parquet(str(empty_path), filters=[("x", ">", 5)]).to_pandas()
     assert len(empty_result) == 0
 
     df = _xy_frame(50)
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     path = tmp_path / "no_match.parquet"
     table.to_parquet(str(path), row_group_size=10)
 
-    no_match_result = flint.Table.from_parquet(
+    no_match_result = pydart.Table.from_parquet(
         str(path), filters=[("x", ">", 1_000_000)]
     ).to_pandas()
     assert len(no_match_result) == 0
@@ -228,14 +228,14 @@ def test_idempotent_double_read(tmp_path):
     """Running the same from_parquet(filters=..., columns=...) twice on the same file yields
     identical Tables (a pure read, no shared/mutated state)."""
     df = _xy_frame(100)
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     path = tmp_path / "idempotent.parquet"
     table.to_parquet(str(path), row_group_size=25)
 
-    first = flint.Table.from_parquet(
+    first = pydart.Table.from_parquet(
         str(path), columns=["y", "x"], filters=[("x", ">=", 10)]
     ).to_pandas()
-    second = flint.Table.from_parquet(
+    second = pydart.Table.from_parquet(
         str(path), columns=["y", "x"], filters=[("x", ">=", 10)]
     ).to_pandas()
 

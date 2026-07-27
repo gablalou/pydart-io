@@ -1,7 +1,7 @@
 """End-to-end Parquet round-trip tests (PARQ-01, basic PARQ-02/D-28).
 
 These target `Table.from_parquet`/`table.to_parquet` (D-19: classmethod/instance method, same
-`from_X`/`to_X` shape as `from_pandas`/`to_pandas`; no module-level `flint.read_parquet`/
+`from_X`/`to_X` shape as `from_pandas`/`to_pandas`; no module-level `pydart.read_parquet`/
 `write_parquet`). Until Task 3 lands the `#[pymethods]`, every test here fails with an
 AttributeError -- that failure is expected and recorded as the MVP failing-test-first step; Task 3
 turns them green.
@@ -10,7 +10,7 @@ turns them green.
 import pandas as pd
 import pandas.testing as pdt
 
-import flint
+import pydart
 
 
 def _numeric_arrow_dtype_frame() -> pd.DataFrame:
@@ -24,11 +24,11 @@ def _numeric_arrow_dtype_frame() -> pd.DataFrame:
 
 def test_numeric_table_round_trips_through_parquet(tmp_path):
     df = _numeric_arrow_dtype_frame()
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
 
     path = tmp_path / "t.parquet"
     table.to_parquet(str(path))
-    result = flint.Table.from_parquet(str(path))
+    result = pydart.Table.from_parquet(str(path))
 
     pdt.assert_frame_equal(result.to_pandas(), df)
 
@@ -40,11 +40,11 @@ def test_bool_column_round_trips_through_parquet(tmp_path):
             "b": pd.array([True, False, True], dtype="bool[pyarrow]"),
         }
     )
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
 
     path = tmp_path / "bool.parquet"
     table.to_parquet(str(path))
-    result = flint.Table.from_parquet(str(path))
+    result = pydart.Table.from_parquet(str(path))
 
     pdt.assert_frame_equal(result.to_pandas(), df)
 
@@ -52,11 +52,11 @@ def test_bool_column_round_trips_through_parquet(tmp_path):
 def test_pathlib_path_accepted(tmp_path):
     """D-20: from_parquet/to_parquet accept a pathlib.Path (not just str)."""
     df = _numeric_arrow_dtype_frame()
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
 
     path = tmp_path / "pathlib.parquet"
     table.to_parquet(path)
-    result = flint.Table.from_parquet(path)
+    result = pydart.Table.from_parquet(path)
 
     pdt.assert_frame_equal(result.to_pandas(), df)
 
@@ -67,7 +67,7 @@ def test_to_parquet_overwrites_existing_file_silently(tmp_path):
     path = tmp_path / "overwrite.parquet"
 
     first_df = _numeric_arrow_dtype_frame()
-    flint.Table.from_pandas(first_df).to_parquet(str(path))
+    pydart.Table.from_pandas(first_df).to_parquet(str(path))
 
     second_df = pd.DataFrame(
         {
@@ -75,15 +75,15 @@ def test_to_parquet_overwrites_existing_file_silently(tmp_path):
             "b": pd.array([9.9, 8.8], dtype="float64[pyarrow]"),
         }
     )
-    flint.Table.from_pandas(second_df).to_parquet(str(path))
+    pydart.Table.from_pandas(second_df).to_parquet(str(path))
 
-    result = flint.Table.from_parquet(str(path))
+    result = pydart.Table.from_parquet(str(path))
     pdt.assert_frame_equal(result.to_pandas(), second_df)
 
 
 def test_empty_table_round_trips(tmp_path):
     """Empty-table decision (must_haves): a 0-row Table round-trips through Parquet without
-    raising -- diverges from to_pandas's empty-table FlintError::Other, because an empty Parquet
+    raising -- diverges from to_pandas's empty-table PydartError::Other, because an empty Parquet
     file carrying just the schema is a valid, readable artifact."""
     empty_df = pd.DataFrame(
         {
@@ -91,11 +91,11 @@ def test_empty_table_round_trips(tmp_path):
             "b": pd.array([], dtype="float64[pyarrow]"),
         }
     )
-    table = flint.Table.from_pandas(empty_df)
+    table = pydart.Table.from_pandas(empty_df)
 
     path = tmp_path / "empty.parquet"
     table.to_parquet(str(path))
-    result = flint.Table.from_parquet(str(path))
+    result = pydart.Table.from_parquet(str(path))
 
     result_df = result.to_pandas()
     assert len(result_df) == 0

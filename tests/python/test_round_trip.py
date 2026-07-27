@@ -2,14 +2,14 @@
 
 Plan 01 (the walking skeleton) covered non-null int64/float64 `ArrowDtype` columns only. Plan 02
 generalizes `from_pandas`/`to_pandas` to the full per-column decision matrix (`plan_column` in
-`flint-core`): `ArrowDtype`-backed numeric/bool columns AND numpy-backed numeric columns (borrowed
+`pydart-core`): `ArrowDtype`-backed numeric/bool columns AND numpy-backed numeric columns (borrowed
 zero-copy when contiguous, copied via the pandas/pyarrow stream-export fallback otherwise).
 """
 
 import pandas as pd
 import pandas.testing as pdt
 
-import flint
+import pydart
 
 
 def _numeric_arrow_dtype_frame() -> pd.DataFrame:
@@ -25,7 +25,7 @@ def _numeric_arrow_dtype_frame() -> pd.DataFrame:
 def test_from_pandas_to_pandas_round_trip_preserves_values_and_dtypes():
     df = _numeric_arrow_dtype_frame()
 
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     result = table.to_pandas()
 
     pdt.assert_frame_equal(result, df)
@@ -42,7 +42,7 @@ def test_from_pandas_to_pandas_round_trip_preserves_arrow_dtype_bool():
         }
     )
 
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     result = table.to_pandas()
 
     pdt.assert_frame_equal(result, df)
@@ -62,7 +62,7 @@ def test_from_pandas_to_pandas_round_trip_numpy_numeric_preserves_values():
         }
     )
 
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     result = table.to_pandas()
 
     for column in df.columns:
@@ -71,14 +71,14 @@ def test_from_pandas_to_pandas_round_trip_numpy_numeric_preserves_values():
 
 def test_from_pandas_non_contiguous_numpy_column_round_trips_via_copy_fallback():
     """A non-contiguous numpy column (e.g. a stride-2 slice) is NOT zero-copy borrowed --
-    `plan_column` classifies it `RequiresCopy` (asserted directly in flint-core's unit tests) --
+    `plan_column` classifies it `RequiresCopy` (asserted directly in pydart-core's unit tests) --
     but must still convert correctly via the copy fallback, never crash or misread memory
     (RESEARCH.md Security Domain: contiguity/offset must be checked before any numpy borrow)."""
     base = pd.Series(range(10), dtype="int64")
     sliced = base[::2].reset_index(drop=True)  # stride-2 view: non-contiguous
     df = pd.DataFrame({"a": sliced})
 
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     result = table.to_pandas()
 
     assert result["a"].tolist() == df["a"].tolist()
@@ -90,7 +90,7 @@ def test_from_pandas_numpy_backed_bool_round_trips_via_copy_fallback():
     strict-mode REJECTION of this same case (D-03) is covered in `test_strict_mode.py`."""
     df = pd.DataFrame({"a": pd.Series([True, False, True], dtype=bool)})
 
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     result = table.to_pandas()
 
     assert result["a"].tolist() == df["a"].tolist()
@@ -106,7 +106,7 @@ def test_from_pandas_preserves_all_rows_of_multi_chunk_arrow_backed_column():
     df2 = pd.DataFrame({"a": pd.array([4, 5, 6], dtype="int64[pyarrow]")})
     df = pd.concat([df1, df2], ignore_index=True)
 
-    table = flint.Table.from_pandas(df)
+    table = pydart.Table.from_pandas(df)
     result = table.to_pandas()
 
     assert len(result) == 6
