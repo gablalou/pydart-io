@@ -32,8 +32,9 @@ benchmark dashboard is used for v1.
   code was modified in this plan.
 - **Zero-copy / copy-fallback labels:** driven by pydart's own `Table.copy_report()` API, captured
   empirically for every scenario -- not assumed from the scenario's name or intent. See "Scenario
-  Shapes & Empirical Zero-Copy Status" below; one scenario's empirical status **disagrees** with
-  this plan's original grouping (see Known Limitations).
+  Shapes & Empirical Zero-Copy Status" below; one scenario (`chunked_multi_batch`) was
+  reclassified from this plan's original "true zero-copy" grouping to "copy-fallback" to match its
+  empirical status (see Known Limitations).
 - **Reporting convention:** every scenario x axis cell is reported as its own row -- never blended
   into a single aggregate "N times faster" headline number (RESEARCH.md Pitfall 1).
 
@@ -44,7 +45,7 @@ benchmark dashboard is used for v1.
 | `numeric_dense` | `int64[pyarrow]` + `float64[pyarrow]`, no nulls, 1,000,000 rows | `zero_copy=True` (both columns) | true zero-copy | Agrees |
 | `numeric_nullable` | `int64[pyarrow]` + `float64[pyarrow]`, 1-in-10 rows null | `zero_copy=True` (both columns) | true zero-copy | Agrees |
 | `mixed_object_string` | `int64[pyarrow]` + legacy numpy `object` string column (1-in-7 null) | `zero_copy=True` (numeric col), `zero_copy=False` (object col, D-10 copy) | copy-fallback | Agrees (mixed frame is not fully zero-copy) |
-| `chunked_multi_batch` | `int64[pyarrow]` built via `pd.concat` of two Arrow-backed frames (genuine 2-chunk `ChunkedArray`) | **`zero_copy=False`** -- `from_pandas` runs `arrow::compute::concat` on multi-chunk columns (CR-01/CONV-08), a real copy | true zero-copy | **Disagrees -- see Known Limitations** |
+| `chunked_multi_batch` | `int64[pyarrow]` built via `pd.concat` of two Arrow-backed frames (genuine 2-chunk `ChunkedArray`) | **`zero_copy=False`** -- `from_pandas` runs `arrow::compute::concat` on multi-chunk columns (CR-01/CONV-08), a real copy | copy-fallback (reclassified, see Known Limitations) | Reclassified from this plan's original "true zero-copy" grouping to match its empirical `copy_report()` result -- see Known Limitations |
 | `categorical_ordered` | Ordered `pd.Categorical`, 50 categories, 1,000,000 rows | `zero_copy=False` (categorical reconstruction copy, OQ1) | copy-fallback | Agrees |
 | `categorical_unordered` | Unordered `pd.Categorical`, 300 categories (int16 code width), 1,000,000 rows | `zero_copy=False` (categorical reconstruction copy, OQ1) | copy-fallback | Agrees |
 
@@ -113,14 +114,14 @@ in the Rust core.
 
 ## Pass Bar Evaluation
 
-**Stated, falsifiable pass bar (agreed at plan time):**
-- **True-zero-copy scenarios** (`numeric_dense`, `numeric_nullable`, `chunked_multi_batch`) must
-  show pydart throughput **>= 2x** pyarrow throughput on `from_pandas`, AND pydart peak RSS
-  **<=** pyarrow peak RSS (evaluated on the `from_pandas` axis, the axis the zero-copy claim
-  actually describes).
-- **Copy-fallback scenarios** (`mixed_object_string`, `categorical_ordered`,
-  `categorical_unordered`) must be within **+/-20%** of pyarrow throughput, reported either way
-  (win or loss), on every axis.
+**Stated, falsifiable pass bar (agreed at plan time; scenario grouping updated per the Task 3
+human sign-off -- see "Human Sign-Off" and "Known Limitations" below):**
+- **True-zero-copy scenarios** (`numeric_dense`, `numeric_nullable`) must show pydart throughput
+  **>= 2x** pyarrow throughput on `from_pandas`, AND pydart peak RSS **<=** pyarrow peak RSS
+  (evaluated on the `from_pandas` axis, the axis the zero-copy claim actually describes).
+- **Copy-fallback scenarios** (`mixed_object_string`, `chunked_multi_batch` (reclassified),
+  `categorical_ordered`, `categorical_unordered`) must be within **+/-20%** of pyarrow throughput,
+  reported either way (win or loss), on every axis.
 
 **Evaluation against the numbers above:**
 
@@ -128,39 +129,52 @@ in the Rust core.
 |----------|-------|---------------------|------------|---------|
 | `numeric_dense` | true zero-copy | 3.24x **slower** (bar requires >= 2x faster) | pydart +9.73 MB (bar requires <=) | **FAIL** |
 | `numeric_nullable` | true zero-copy | 3.13x **slower** | pydart -0.11 MB (passes, marginal) | **FAIL** (throughput) |
-| `chunked_multi_batch` | true zero-copy (label disputed, see below) | 19.16x **slower** | pydart +18.89 MB (fails) | **FAIL** |
+| `chunked_multi_batch` | copy-fallback (reclassified) | 19.16x slower on `from_pandas` (outside +/-20%); 1.33x slower on `to_pandas` (outside +/-20%); 12.88x/9.17x slower on Parquet axes (outside +/-20%) | n/a (informational only) | **FAIL** on all 4 axes |
 | `mixed_object_string` | copy-fallback | 12.73x slower on `from_pandas` (outside +/-20%); 1.95x **faster** on `to_pandas` (outside window, favorably); 13.26x/16.28x slower on Parquet axes | n/a (informational only) | **FAIL** on 3 of 4 axes; `to_pandas` is an honest pydart win |
 | `categorical_ordered` | copy-fallback | 1.47x slower on `from_pandas` (outside +/-20%); 1.10x slower on `to_pandas` (within +/-20%, passes); 42.68x/25.80x slower on Parquet axes | n/a | **FAIL** on 3 of 4 axes |
 | `categorical_unordered` | copy-fallback | 1.40x slower on `from_pandas` (outside +/-20%); 1.10x slower on `to_pandas` (within +/-20%, passes); 22.08x/32.00x slower on Parquet axes | n/a | **FAIL** on 3 of 4 axes |
 
-**Overall verdict: the stated pass bar is NOT met.** Every true-zero-copy scenario fails on
-throughput -- not narrowly (under the 2x bar), but in the *opposite direction*: pydart is
-currently 3-19x **slower** than pyarrow at the full Python-level call path across every axis
-except `to_pandas`, where it is roughly at parity (or, for `mixed_object_string`, faster).
-Peak RSS tells a different, more favorable story: pydart's memory footprint is competitive with
-or better than pyarrow's on the Parquet read/write axes (up to ~27 MB lower), even though
-throughput lags badly on those same axes. This is reported honestly, per Pitfall 1/6 -- it is not
-adjusted, softened, or averaged away. Whether this constitutes a blocker to sealing Phase 4 is a
-human decision, not an implicit pass -- see the Task 3 checkpoint.
+**Overall verdict: the stated pass bar is NOT met.** Both true-zero-copy scenarios
+(`numeric_dense`, `numeric_nullable`) fail on throughput -- not narrowly (under the 2x bar), but
+in the *opposite direction*: pydart is currently 3-19x **slower** than pyarrow at the full
+Python-level call path across every axis except `to_pandas`, where it is roughly at parity (or,
+for `mixed_object_string`, faster). `chunked_multi_batch` -- reclassified as copy-fallback per the
+Task 3 human sign-off (see "Human Sign-Off" and "Known Limitations" below) -- also fails its
+(more lenient) +/-20% copy-fallback bar on all four axes. Peak RSS tells a different, more
+favorable story: pydart's memory footprint is competitive with or better than pyarrow's on the
+Parquet read/write axes (up to ~27 MB lower), even though throughput lags badly on those same
+axes. This is reported honestly, per Pitfall 1/6 -- it is not adjusted, softened, or averaged
+away.
+
+**Human Sign-Off (Task 3, 2026-07-28):** The pass-bar miss above is accepted as an honest,
+non-blocking finding for this plan. BENCH-01 and BENCH-02 require an honest comparative benchmark
+suite reporting throughput and peak RSS across the full scenario matrix, regardless of the
+outcome -- both requirements are satisfied by this document as written. The benchmark methodology
+itself is not being reworked or re-tuned to chase the pass bar; the miss is carried forward as a
+real, unresolved finding. Separately, and out of scope for this plan, investigating and closing
+the underlying FFI/GIL-boundary throughput gap (see "Throughput bottleneck..." below) is deferred
+to a future phase decision before any real PyPI release proceeds -- Plan 04-02 itself is signed
+off and complete.
 
 ## Known Limitations
 
-### `chunked_multi_batch`'s zero-copy label conflicts with its measured behavior
+### `chunked_multi_batch` was reclassified from "true zero-copy" to "copy-fallback"
 
-This plan's task specification and pass bar list `chunked_multi_batch` under "true zero-copy"
-scenarios. Empirically, it is **not**: `pydart.Table.from_pandas` concatenates multi-chunk
-Arrow-backed columns via `arrow::compute::concat` (the CR-01/CONV-08 fix), which is a real copy.
-`Table.copy_report()` reports `zero_copy=False` for this scenario's column, and `strict=True`
-correctly raises `pydart.ZeroCopyRequiredError` for it (see
+This plan's original task specification and pass bar listed `chunked_multi_batch` under "true
+zero-copy" scenarios. Empirically, it is **not**: `pydart.Table.from_pandas` concatenates
+multi-chunk Arrow-backed columns via `arrow::compute::concat` (the CR-01/CONV-08 fix), which is a
+real copy. `Table.copy_report()` reports `zero_copy=False` for this scenario's column, and
+`strict=True` correctly raises `pydart.ZeroCopyRequiredError` for it (see
 `tests/python/test_multi_chunk_diagnostics.py`). Presenting this scenario as "true zero-copy" in a
-public BENCHMARKS.md would contradict the project's own diagnostics-honesty posture (D-03/D-04,
-D-26) and its own `copy_report()` output -- a credibility problem for a project whose entire pitch
-is honesty about what is and isn't zero-copy (Pitfall 1). This file reports the scenario's
-empirical `copy_report()` status plainly in the table above rather than silently accepting the
-plan's original label or silently relabeling it without flagging the conflict. **Resolution
-(reclassify `chunked_multi_batch` as copy-fallback, or keep it as a labeled true-zero-copy
-*candidate* that currently fails the concat-copy check) is a human decision, raised explicitly at
-the Task 3 checkpoint.**
+public BENCHMARKS.md would have contradicted the project's own diagnostics-honesty posture
+(D-03/D-04, D-26) and its own `copy_report()` output -- a credibility problem for a project whose
+entire pitch is honesty about what is and isn't zero-copy (Pitfall 1). **Resolved at the Task 3
+human sign-off (2026-07-28): `chunked_multi_batch` has been reclassified as copy-fallback
+throughout this document** (Scenario Shapes table, Pass Bar Evaluation grouping and evaluation
+table, and the stated pass bar's scenario lists above) to match its measured `copy_report()`
+behavior. Re-evaluated against the copy-fallback +/-20% bar using the throughput numbers already
+in the Results Matrix, it still fails on all four axes (19.16x/1.33x/12.88x/9.17x slower) -- the
+reclassification changes which bar applies, not the underlying result.
 
 ### Categorical Parquet round-trip fidelity gap (D-40/T-03-09)
 
