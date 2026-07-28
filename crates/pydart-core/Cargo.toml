@@ -14,6 +14,7 @@ parquet = "59.1.0"
 
 [dev-dependencies]
 allocation-counter = "0.8"
+criterion = "0.8"
 
 # Plan 03's D-06b zero-copy allocation-counting proof lives at the repo-root `tests/rust/` path
 # (locked by 01-PATTERNS.md / 01-03-PLAN.md), not this crate's own `tests/` directory -- an
@@ -45,3 +46,10 @@ path = "../../tests/rust/parquet_dictionary_tz_roundtrip.rs"
 [[test]]
 name = "parquet_row_group_pruning"
 path = "../../tests/rust/parquet_row_group_pruning.rs"
+
+# Plan 04-01 Task 3 (BENCH-01): criterion micro-benchmark isolating pure-Rust conversion kernel
+# time from PyO3/GIL overhead, per CLAUDE.md's explicit criterion rationale. Crate-local
+# `benches/` path, no `path =` override needed (unlike the repo-root `[[test]]` entries above).
+[[bench]]
+name = "conversion_bench"
+harness = false
