@@ -16,15 +16,19 @@ from pathlib import Path
 import psutil
 
 
-def measure_peak_rss(scenario_script: str, scenario_name: str, impl: str = "pydart") -> int:
+def measure_peak_rss(
+    scenario_script: str, scenario_name: str, impl: str = "pydart", axis: str = "round_trip"
+) -> int:
     """Run `scenario_script` in a fresh subprocess; poll psutil for peak RSS.
 
-    `impl` selects which library's round trip `scenario_script` exercises (`pydart` or
-    `pyarrow`) -- BENCHMARKS.md's pass bar compares both per scenario.
+    `impl` selects which library's operation `scenario_script` exercises (`pydart` or
+    `pyarrow`); `axis` selects which matrix axis (`from_pandas`, `to_pandas`, `write_parquet`,
+    `read_parquet`, or the Plan 01 default `round_trip`) -- BENCHMARKS.md's pass bar compares
+    pydart vs pyarrow peak RSS per scenario/axis cell.
 
     Returns peak RSS in bytes.
     """
-    proc = subprocess.Popen([sys.executable, scenario_script, scenario_name, impl])
+    proc = subprocess.Popen([sys.executable, scenario_script, scenario_name, impl, axis])
     p = psutil.Process(proc.pid)
     peak = 0
     while proc.poll() is None:
@@ -38,6 +42,7 @@ def measure_peak_rss(scenario_script: str, scenario_name: str, impl: str = "pyda
 if __name__ == "__main__":
     scenario_arg = sys.argv[1] if len(sys.argv) > 1 else "numeric_dense"
     impl_arg = sys.argv[2] if len(sys.argv) > 2 else "pydart"
+    axis_arg = sys.argv[3] if len(sys.argv) > 3 else "round_trip"
     scenario_script_path = str(Path(__file__).resolve().parent / "scenarios_memory.py")
-    peak_bytes = measure_peak_rss(scenario_script_path, scenario_arg, impl_arg)
-    print(f"{scenario_arg} ({impl_arg}): peak RSS = {peak_bytes} bytes")
+    peak_bytes = measure_peak_rss(scenario_script_path, scenario_arg, impl_arg, axis_arg)
+    print(f"{scenario_arg} ({impl_arg}, {axis_arg}): peak RSS = {peak_bytes} bytes")
