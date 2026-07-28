@@ -132,10 +132,10 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. The project builds installable wheels for manylinux, macOS, and Windows via maturin, and CI passes across the supported numpy/pandas version matrix
   4. The package installs cleanly via `uv` (`uv add`/`uv pip install`), with a working uv-compatible lockfile and dev commands
 
-**Plans**: 4 plans
+**Plans**: 1/4 plans executed
 **Wave 1**
 
-- [ ] 04-01-PLAN.md — Config floor (name→pydart-io, py>=3.11, numpy/pandas floors) + benchmark tracer slice (one scenario end-to-end: throughput + RSS + Rust criterion)
+- [x] 04-01-PLAN.md — Config floor (name→pydart-io, py>=3.11, numpy/pandas floors) + benchmark tracer slice (one scenario end-to-end: throughput + RSS + Rust criterion)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -156,4 +156,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 1. Core Zero-Copy Round-Trip & Interop | 5/5 | Complete    | 2026-07-14 |
 | 2. Full Dtype & Structural Coverage | 5/5 | Complete    | 2026-07-23 |
 | 3. Parquet IO | 4/4 | Complete    | 2026-07-24 |
-| 4. Benchmark & Release Readiness | 0/TBD | Not started | - |
+| 4. Benchmark & Release Readiness | 1/4 | In Progress|  |

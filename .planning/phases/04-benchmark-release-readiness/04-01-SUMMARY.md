@@ -207,6 +207,10 @@ None - no external service configuration required.
 - The benchmark harness pattern (`benchmarks/scenarios.py` as single source of scenario definitions, throughput + RSS + criterion all wired to one scenario) is proven and ready for Plan 02 to extend to the full {mixed, nullable, chunked, object-string, categorical} matrix.
 - **Concern carried forward:** pydart's `from_pandas` currently loses to pyarrow on the one true-zero-copy scenario measured so far at the full Python-level call path, even though the isolated Rust kernel is effectively free. This is a real, honestly-reported finding (not a benchmark-harness bug) that Plan 02/03 should investigate — likely FFI/GIL-boundary overhead in the pandas-interop layer — before the project's core "measurably faster than pyarrow" claim can be validated across the matrix.
 
+## Self-Check: PASSED
+
+All created files confirmed present on disk; all task/plan commit hashes (`2fff62f`, `0f0ca81`, `c703053`) confirmed present in git log.
+
 ---
 *Phase: 04-benchmark-release-readiness*
 *Completed: 2026-07-28*

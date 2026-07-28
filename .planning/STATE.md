@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 4
-current_phase_name: Benchmark & Release Readiness
+current_phase: 04
+current_phase_name: benchmark-release-readiness
 status: executing
-stopped_at: Phase 4 context gathered
-last_updated: "2026-07-28T06:52:48.599Z"
-last_activity: 2026-07-24
-last_activity_desc: Phase 03 complete, transitioned to Phase 4
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-07-28T08:07:20.111Z"
+last_activity: 2026-07-28
+last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 18
-  completed_plans: 14
+  completed_plans: 15
 ---
 
 # Project State
@@ -23,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-24)
 
 **Core value:** Converting a pandas DataFrame to/from an Arrow Table should be zero-copy (or as close to it as physically possible) and measurably faster than pyarrow — this must work and must be provably faster, or the project has no reason to exist.
-**Current focus:** Phase 4 — Benchmark & Release Readiness
+**Current focus:** Phase 04 — benchmark-release-readiness
 
 ## Current Position
 
-Phase: 4 — Benchmark & Release Readiness
-Plan: Not started
+Phase: 04 (benchmark-release-readiness) — EXECUTING
+Plan: 2 of 4
 Status: Ready to execute
-Last activity: 2026-07-24 — Phase 03 complete, transitioned to Phase 4
+Last activity: 2026-07-28 — Phase 04 execution started
 
-Progress: [██████████] 100%
+Progress: [████████░░] 83%
 
 ## Performance Metrics
 
@@ -69,6 +69,7 @@ Progress: [██████████] 100%
 | Phase 03 P02 | 10min | 2 tasks | 4 files |
 | Phase 03-parquet-io P03 | resumed | 3 tasks | 7 files |
 | Phase 03 P04 | 39min | 3 tasks | 7 files |
+| Phase 04 P01 | 40min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -108,6 +109,11 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 03 P04]: CHECKPOINT (user-approved, Option A) -- categorical/dictionary Parquet fidelity tests scoped to what arrow-rs's DictEncoder actually guarantees (DataType::Dictionary, dict_is_ordered, per-row values); exact .cat.categories order and unused-category retention are NOT guaranteed (arrow-rs-vs-pyarrow divergence, no WriterProperties fix in parquet 59.1.0) -- documented as accepted risk, real correctness concern only for ordered categoricals
 - [Phase 03 code review]: CR-01 (Critical, fixed df26820) -- evaluate_predicate's row-level filter relied on arrow::compute::cast's null-on-overflow semantics with no range check, silently returning wrong row sets for out-of-range integer filter literals against narrower integer columns (violated D-26). Fixed via an integer_bounds pre-cast range-check helper; independently re-verified live by the phase verifier. Also fixed same pass: WR-01 (unchecked paths[0] panic), WR-02 (silently swallowed read_dir errors + missing is_file() filter), WR-03 (missing UInt64 stats arm), WR-04 (missing dict_is_ordered in cross-file schema-match).
 - [Phase 03 secure-phase]: Full STRIDE register across all 4 plans (10 threats: T-03-01 through T-03-09 plus T-03-SC/T-03-02) verified closed -- threats_open: 0, ASVS level 1, see 03-SECURITY.md. Three code-review-fixed bugs (T-03-04, T-03-07, T-03-08) mapped directly onto the CR-01/WR-02/WR-04 findings above.
+- [Phase ?]: [Phase 04 P01]: numpy dev-pin loosened from exact ==2.5.1 to a range (>=2.3,<2.6) so uv's universal resolver can pick numpy 2.4.x for Python 3.11 and 2.5.x for 3.12+ within one uv.lock, empirically resolving RESEARCH.md Assumption A1 and letting requires-python drop back to >=3.11 (D-35)
+- [Phase ?]: [Phase 04 P01]: pyproject.toml [project].name changed to pydart-io (D-41) to resolve the real-PyPI name collision; import path pydart, module-name pydart._pydart, and all Rust crate/exception names unchanged
+- [Phase ?]: [Phase 04 P01]: .claude/CLAUDE.md pandas version-compatibility claim corrected from >=2.2 to >=3.0 (D-36), closing the WR-02 CoW-safety documentation gap carried forward from Phase 3
+- [Phase ?]: [Phase 04 P01]: crates/pydart-core/benches/conversion_bench.rs was written during Task 2 (not Task 3) because Cargo parses every workspace member's manifest and the new [[bench]] entry in Cargo.toml requires the file to exist for uv sync --dev's editable maturin build to succeed at all; the file was held uncommitted until Task 3, where it was committed as that task's canonical deliverable
+- [Phase ?]: [Phase 04 P01]: benchmark result -- pydart.Table.from_pandas is currently ~2.8-3.5x slower than pyarrow.Table.from_pandas on the numeric_dense scenario at the full Python-level call path, while the isolated Rust conversion kernel (criterion) runs in ~75ns regardless of row count -- the gap lives at the PyO3/GIL/Python-object boundary, not the Rust core; flagged as a concern for Plan 02/03 to investigate before validating the core 'measurably faster than pyarrow' claim
 
 ### Pending Todos
 
@@ -140,6 +146,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-27T06:57:47.435Z
-Stopped at: Phase 4 context gathered
-Resume file: .planning/phases/04-benchmark-release-readiness/04-CONTEXT.md
+Last session: 2026-07-28T08:07:20.098Z
+Stopped at: Completed 04-01-PLAN.md
+Resume file: None
