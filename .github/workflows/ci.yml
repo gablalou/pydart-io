@@ -1,0 +1,43 @@
+name: CI
+
+# Runs the project's real build+test path on every push/PR: cargo test, then
+# `maturin develop` (rebuild + reinstall the PyO3 extension into the venv), then pytest.
+# STATE.md (Phase 2 gate-tooling note): bare `cargo test` never rebuilds the installed
+# extension module, so Python-visible regressions from Rust changes slip through silently
+# unless `maturin develop` runs before pytest. Mirrors config.json's own
+# workflow.build_command / workflow.test_command.
+on:
+  push:
+  pull_request:
+
+# T-04-02 (mitigate): read-only by default; this workflow never needs write access.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: cargo test + maturin develop + pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Sync dev dependencies
+        run: uv sync --dev
+
+      - name: cargo test (Rust workspace)
+        run: cargo test --workspace
+
+      # Deliberately runs BEFORE pytest: rebuilds and reinstalls the compiled PyO3
+      # extension into the uv-managed venv so Rust-side changes are actually exercised by
+      # the Python test suite, not a stale previously-installed .so.
+      - name: maturin develop (rebuild + reinstall extension)
+        run: uv run maturin develop
+
+      - name: pytest (Python test suite)
+        run: uv run pytest

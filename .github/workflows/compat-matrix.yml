@@ -1,0 +1,59 @@
+name: Compatibility Matrix
+
+# PKG-02/D-37: prove the test suite passes against both the oldest and newest supported
+# numpy/pandas versions, not just "whatever uv.lock happens to pick" (RESEARCH.md Pitfall 7 /
+# CLAUDE.md's own "CI matrix testing only latest" anti-pattern). Two-endpoint matrix, not a
+# full cross-product, per RESEARCH.md Open Question 3 and this project's yolo/coarse config.
+on:
+  push:
+  pull_request:
+
+# T-04-02 (mitigate): read-only by default.
+permissions:
+  contents: read
+
+jobs:
+  compat:
+    name: "py${{ matrix.python-version }} / numpy ${{ matrix.numpy-version }} / pandas ${{ matrix.pandas-version }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Oldest supported endpoint.
+          - python-version: "3.11"
+            numpy-version: "2.3.0"
+            pandas-version: "3.0.0"
+          # Newest supported endpoint. Note (Pitfall 4): numpy 2.5.x dropped Python 3.11
+          # support and requires Python >=3.12 -- it pairs ONLY with the 3.12 cell below,
+          # never with the 3.11 cell above.
+          - python-version: "3.12"
+            numpy-version: "2.5.1"
+            pandas-version: "3.0.5"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Sync dev dependencies
+        run: uv sync --dev --python ${{ matrix.python-version }}
+
+      # Override the resolved numpy/pandas with this cell's exact endpoint version so the
+      # test suite actually exercises the declared floor/ceiling, not whatever uv.lock's
+      # universal resolver picked by default for this interpreter.
+      - name: Pin numpy/pandas to this cell's endpoint versions
+        run: >
+          uv pip install
+          --python ${{ matrix.python-version }}
+          "numpy==${{ matrix.numpy-version }}"
+          "pandas==${{ matrix.pandas-version }}"
+
+      - name: maturin develop (rebuild + reinstall extension against this cell's numpy/pandas)
+        run: uv run --python ${{ matrix.python-version }} maturin develop
+
+      - name: pytest
+        run: uv run --python ${{ matrix.python-version }} pytest
