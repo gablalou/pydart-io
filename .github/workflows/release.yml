@@ -1,0 +1,123 @@
+name: Release
+
+# D-32/PKG-03: build wheels for every D-34 cell, re-verify compatibility across the D-37
+# numpy/pandas endpoint matrix, then publish to real PyPI via OIDC trusted publishing (no
+# stored long-lived PyPI API token anywhere -- RESEARCH.md Pattern 3, T-04-01 mitigation).
+# Triggered by a version tag push or manual dispatch so a release only happens on an
+# explicit, deliberate action, never as a side effect of an ordinary push/PR.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+# T-04-02 (mitigate): workflow-wide default stays read-only. `id-token: write` is granted
+# ONLY on the `publish` job below -- never here, never on `wheels`/`compat-matrix`.
+permissions:
+  contents: read
+
+jobs:
+  wheels:
+    name: Build wheel (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # D-34 cells, mirrored from wheels.yml so a release always builds all five --
+          # a release must never silently ship a partial platform set.
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            manylinux: "2014"
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            manylinux: "2014"
+          # macos-13 was retired by GitHub in Dec 2025 (04-03-SUMMARY.md finding);
+          # macos-15-intel is the current Intel/x86_64 hosted runner label.
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - runner: macos-14
+            target: aarch64-apple-darwin
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux || 'auto' }}
+          args: --release --out dist
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.target }}
+          path: dist/*.whl
+
+  compat-matrix:
+    name: "py${{ matrix.python-version }} / numpy ${{ matrix.numpy-version }} / pandas ${{ matrix.pandas-version }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # D-37 two-endpoint gate, mirrored from compat-matrix.yml: a release must not ship
+          # if either the oldest or newest supported numpy/pandas endpoint has regressed.
+          - python-version: "3.11"
+            numpy-version: "2.3.0"
+            pandas-version: "3.0.0"
+          - python-version: "3.12"
+            numpy-version: "2.5.1"
+            pandas-version: "3.0.5"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Sync dev dependencies
+        run: uv sync --dev --python ${{ matrix.python-version }}
+
+      - name: Pin numpy/pandas to this cell's endpoint versions
+        run: >
+          uv pip install
+          --python ${{ matrix.python-version }}
+          "numpy==${{ matrix.numpy-version }}"
+          "pandas==${{ matrix.pandas-version }}"
+
+      - name: maturin develop (rebuild + reinstall extension against this cell's numpy/pandas)
+        run: uv run --python ${{ matrix.python-version }} maturin develop
+
+      - name: pytest
+        run: uv run --python ${{ matrix.python-version }} pytest
+
+  publish:
+    name: Publish to PyPI (OIDC)
+    # A failing wheel cell or a failing compat endpoint blocks the publish outright --
+    # this is the actual enforcement mechanism for "never ship on a red matrix."
+    needs: [wheels, compat-matrix]
+    runs-on: ubuntu-latest
+    environment: pypi
+    # T-04-01 mitigation: id-token: write is scoped to THIS job only. No other job in this
+    # workflow (or any other workflow in this repo) is granted it. This is the short-lived
+    # OIDC credential that gh-action-pypi-publish exchanges for a scoped PyPI upload token at
+    # run time -- no long-lived PyPI API token secret is stored or referenced anywhere in
+    # this repo. The published distribution is `pydart-io` (D-41); nothing here hard-codes
+    # `pydart`.
+    permissions:
+      id-token: write
+    steps:
+      - name: Download wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
