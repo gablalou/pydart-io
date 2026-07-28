@@ -132,7 +132,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. The project builds installable wheels for manylinux, macOS, and Windows via maturin, and CI passes across the supported numpy/pandas version matrix
   4. The package installs cleanly via `uv` (`uv add`/`uv pip install`), with a working uv-compatible lockfile and dev commands
 
-**Plans**: TBD
+**Plans**: 4 plans
+- [ ] 04-01-PLAN.md — Config floor (name→pydart-io, py>=3.11, numpy/pandas floors) + benchmark tracer slice (one scenario end-to-end: throughput + RSS + Rust criterion)
+- [ ] 04-02-PLAN.md — Benchmark matrix expansion + BENCHMARKS.md finalize (zero-copy/copy labels, falsifiable pass bar, D-40 caveat)
+- [ ] 04-03-PLAN.md — Packaging pipeline: wheel build (D-34 matrix) + CI + numpy/pandas compat matrix (PKG-01/02/03)
+- [ ] 04-04-PLAN.md — Release: OIDC trusted-publishing workflow + real PyPI publish of pydart-io (D-32)
 
 ## Progress
 
