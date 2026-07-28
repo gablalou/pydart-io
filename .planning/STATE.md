@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 04
 current_phase_name: benchmark-release-readiness
 status: executing
-stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-07-28T08:07:20.111Z"
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-07-28T08:31:08.047Z"
 last_activity: 2026-07-28
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 18
-  completed_plans: 15
+  completed_plans: 16
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-07-24)
 ## Current Position
 
 Phase: 04 (benchmark-release-readiness) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-07-28 — Phase 04 execution started
 
-Progress: [████████░░] 83%
+Progress: [█████████░] 89%
 
 ## Performance Metrics
 
@@ -70,6 +70,7 @@ Progress: [████████░░] 83%
 | Phase 03-parquet-io P03 | resumed | 3 tasks | 7 files |
 | Phase 03 P04 | 39min | 3 tasks | 7 files |
 | Phase 04 P01 | 40min | 3 tasks | 11 files |
+| Phase 04 P02 | 12min | 3 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -114,6 +115,9 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 04 P01]: .claude/CLAUDE.md pandas version-compatibility claim corrected from >=2.2 to >=3.0 (D-36), closing the WR-02 CoW-safety documentation gap carried forward from Phase 3
 - [Phase ?]: [Phase 04 P01]: crates/pydart-core/benches/conversion_bench.rs was written during Task 2 (not Task 3) because Cargo parses every workspace member's manifest and the new [[bench]] entry in Cargo.toml requires the file to exist for uv sync --dev's editable maturin build to succeed at all; the file was held uncommitted until Task 3, where it was committed as that task's canonical deliverable
 - [Phase ?]: [Phase 04 P01]: benchmark result -- pydart.Table.from_pandas is currently ~2.8-3.5x slower than pyarrow.Table.from_pandas on the numeric_dense scenario at the full Python-level call path, while the isolated Rust conversion kernel (criterion) runs in ~75ns regardless of row count -- the gap lives at the PyO3/GIL/Python-object boundary, not the Rust core; flagged as a concern for Plan 02/03 to investigate before validating the core 'measurably faster than pyarrow' claim
+- [Phase ?]: [Phase 04 P02]: chunked_multi_batch reclassified from 'true zero-copy' to 'copy-fallback' throughout BENCHMARKS.md to match its empirical copy_report()==False result (arrow::compute::concat on multi-chunk columns, CR-01/CONV-08) -- human-confirmed at the Task 3 checkpoint
+- [Phase ?]: [Phase 04 P02]: Benchmark pass-bar miss (every true-zero-copy scenario 3-19x slower than pyarrow on from_pandas) signed off as accepted and non-blocking -- BENCH-01/BENCH-02 require an honest comparative suite reporting throughput+RSS regardless of outcome, which BENCHMARKS.md satisfies without reworking the methodology
+- [Phase ?]: [Phase 04 P02]: FFI/GIL-boundary throughput investigation (pydart 3-43x slower than pyarrow on every axis except to_pandas) deferred to a future phase decision, to be resolved before any real PyPI release
 
 ### Pending Todos
 
@@ -128,6 +132,7 @@ None yet.
 - ~~Phase 3 (research-flagged): confirm pandas ArrowDtype import-side support status (pandas 3.0.x) before finalizing pandas-interop reverse direction — may affect Phase 2 design already, verify at Phase 2 plan time too.~~ -- Moot: Phases 2 and 3 both shipped and verified without this surfacing as a blocker.
 - Phase 4 (research-flagged): benchmarking methodology (criterion/pytest-benchmark/codspeed) and manylinux/glibc floor are MEDIUM-confidence, task-derived recommendations — validate current best practice at plan time.
 - Phase 3 (accepted, documented -- see 03-04-SUMMARY.md Known Gap): arrow-rs's ArrowWriter/DictEncoder reassigns dictionary keys in first-occurrence-during-encoding order and drops unused categories on Parquet write, so a categorical's .cat.categories order and unused categories do NOT survive a Parquet round-trip (values and dict_is_ordered DO survive correctly). Cosmetic for unordered categoricals; a real correctness concern for ordered categoricals since the < relationship between categories can silently change. No WriterProperties fix exists in parquet 59.1.0 (arrow-rs-only constraint); pyarrow does not share this limitation. Surface in Phase 4 release docs if categorical fidelity is a headline interop claim.
+- Phase 4 (from 04-02, human-signed-off finding): pydart's core 'measurably faster than pyarrow' value claim is NOT currently substantiated -- from_pandas/to_parquet/from_parquet are 3-43x slower than pyarrow on every scenario except to_pandas (near-parity/win). Accepted as an honest, non-blocking finding for Plan 04-02 (BENCH-01/BENCH-02 only require an honest suite, not a passing bar). User wants the phase paused before Plan 04-04's real PyPI release until the FFI/GIL bottleneck is investigated.
 
 ### Quick Tasks Completed
 
@@ -146,6 +151,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-28T08:07:20.098Z
-Stopped at: Completed 04-01-PLAN.md
+Last session: 2026-07-28T08:31:08.037Z
+Stopped at: Completed 04-02-PLAN.md
 Resume file: None
