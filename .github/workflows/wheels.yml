@@ -35,7 +35,10 @@ jobs:
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             manylinux: "2014"
-          - runner: macos-13
+          # macos-13 was retired by GitHub in Dec 2025 (Assumption A2 confirmed). macos-15-intel
+          # is the current Intel/x86_64 hosted runner label (last available x86_64 image,
+          # supported until Aug 2027 per GitHub's macOS runner deprecation notice).
+          - runner: macos-15-intel
             target: x86_64-apple-darwin
           - runner: macos-14
             target: aarch64-apple-darwin
