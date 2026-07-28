@@ -44,8 +44,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Packaging
 
-- [ ] **PKG-01**: Project builds installable wheels for manylinux, macOS, and Windows via maturin
-- [ ] **PKG-02**: CI tests against a version matrix of supported numpy/pandas versions (oldest to newest supported)
+- [x] **PKG-01**: Project builds installable wheels for manylinux, macOS, and Windows via maturin
+- [x] **PKG-02**: CI tests against a version matrix of supported numpy/pandas versions (oldest to newest supported)
 - [x] **PKG-03**: Package installs cleanly via `uv` (`uv add`/`uv pip install`), and the dev environment (lockfile, build/test commands) is uv-compatible
 
 ## v2 Requirements
@@ -93,8 +93,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PARQ-06 | Phase 3 | Complete |
 | BENCH-01 | Phase 4 | Complete |
 | BENCH-02 | Phase 4 | Complete |
-| PKG-01 | Phase 4 | Pending |
-| PKG-02 | Phase 4 | Pending |
+| PKG-01 | Phase 4 | Complete |
+| PKG-02 | Phase 4 | Complete |
 | PKG-03 | Phase 4 | Complete |
 
 **Coverage:**
