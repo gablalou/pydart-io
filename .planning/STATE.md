@@ -5,10 +5,10 @@ milestone_name: milestone
 current_phase: 04
 current_phase_name: benchmark-release-readiness
 status: executing
-stopped_at: Completed 04-03-PLAN.md
-last_updated: "2026-07-28T10:23:31.608Z"
+stopped_at: 04-04-PLAN.md Task 2 checkpoint (blocking-human, PyPI trusted publisher)
+last_updated: "2026-07-28T12:10:00.000Z"
 last_activity: 2026-07-28
-last_activity_desc: Phase 04 execution started
+last_activity_desc: 04-04 Task 1 (release.yml OIDC workflow) authored and committed; paused at Task 2 human-only PyPI trusted-publisher checkpoint
 progress:
   total_phases: 4
   completed_phases: 3
@@ -29,8 +29,8 @@ See: .planning/PROJECT.md (updated 2026-07-24)
 
 Phase: 04 (benchmark-release-readiness) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
-Last activity: 2026-07-28 — Phase 04 execution started
+Status: PAUSED — Task 1 of 3 done; Task 2 is a blocking-human checkpoint (PyPI trusted publisher configuration) awaiting a fresh continuation agent
+Last activity: 2026-07-28 — 04-04 Task 1 (release.yml) authored and committed (601b787)
 
 Progress: [█████████░] 94%
 
@@ -122,6 +122,7 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 04 P03]: Task 1/2 authored .github/workflows/{wheels,ci,compat-matrix}.yml and proved a host wheel installs via uv; rust-numpy 0.29.0 hardcodes its ABI feature version in-crate (verified via its own build.rs and npyffi source) rather than reading an installed numpy at build time, so no explicit numpy-floor pin is applicable/needed in the wheels.yml build step (Pitfall 3 backstop finding)
 - [Phase ?]: [Phase 04 P03]: All three new workflows default to read-only permissions (contents: read) per T-04-02 mitigation; id-token: write is deferred entirely to Plan 04's dedicated publish job
 - [Phase ?]: [Phase 04 P03] macos-13 GitHub-hosted runner image was retired in Dec 2025 (confirmed via GitHub API job inspection showing no runner assigned + GitHub's own changelog); wheels.yml's x86_64-apple-darwin cell switched to macos-15-intel to unblock the D-34 wheel matrix
+- [Phase 04 P04]: release.yml's `wheels`/`compat-matrix` jobs duplicate (not reference) the matrix definitions already in wheels.yml/compat-matrix.yml, because GitHub Actions `needs:` can only depend on jobs declared in the same workflow file -- the plan's own `needs: [wheels, compat-matrix]` requirement is only achievable by defining those jobs inside release.yml itself
 
 ### Pending Todos
 
@@ -137,6 +138,7 @@ None yet.
 - Phase 4 (research-flagged): benchmarking methodology (criterion/pytest-benchmark/codspeed) and manylinux/glibc floor are MEDIUM-confidence, task-derived recommendations — validate current best practice at plan time.
 - Phase 3 (accepted, documented -- see 03-04-SUMMARY.md Known Gap): arrow-rs's ArrowWriter/DictEncoder reassigns dictionary keys in first-occurrence-during-encoding order and drops unused categories on Parquet write, so a categorical's .cat.categories order and unused categories do NOT survive a Parquet round-trip (values and dict_is_ordered DO survive correctly). Cosmetic for unordered categoricals; a real correctness concern for ordered categoricals since the < relationship between categories can silently change. No WriterProperties fix exists in parquet 59.1.0 (arrow-rs-only constraint); pyarrow does not share this limitation. Surface in Phase 4 release docs if categorical fidelity is a headline interop claim.
 - Phase 4 (from 04-02, human-signed-off finding): pydart's core 'measurably faster than pyarrow' value claim is NOT currently substantiated -- from_pandas/to_parquet/from_parquet are 3-43x slower than pyarrow on every scenario except to_pandas (near-parity/win). Accepted as an honest, non-blocking finding for Plan 04-02 (BENCH-01/BENCH-02 only require an honest suite, not a passing bar). User wants the phase paused before Plan 04-04's real PyPI release until the FFI/GIL bottleneck is investigated.
+- Phase 4 Plan 4 (blocking-human checkpoint, IN PROGRESS): `.github/workflows/release.yml` is authored and committed (`601b787`), but PKG-03's real-PyPI half is NOT satisfied yet -- Task 2 requires a human with PyPI account ownership to configure a Trusted Publisher (GitHub OIDC) for `pydart-io` (repo + `release.yml` + `pypi` environment) and re-verify the name is still free, before Task 3 can trigger the release and verify a real `uv add pydart-io` install. Do not mark PKG-03 complete until both are done.
 - ~~Phase 4 Plan 3 Task 3 (blocking-human checkpoint): repo has no git remote -- wheels.yml/ci.yml/compat-matrix.yml are authored and a host wheel was proven locally, but the full D-34 wheel matrix and D-37 compat matrix cannot run until the repo is created on GitHub and pushed.~~ -- **Resolved**: public repo `gablalou/pydart-io` created and pushed; all five D-34 wheel cells, ci.yml, and both compat-matrix.yml endpoints confirmed green on GitHub Actions (run IDs 30349901732/30349901156/30349901256 on commit fdeca01), after fixing a retired `macos-13` runner image (see 04-03-SUMMARY.md and the decision above).
 
 ### Quick Tasks Completed
