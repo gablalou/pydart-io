@@ -133,9 +133,17 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. The package installs cleanly via `uv` (`uv add`/`uv pip install`), with a working uv-compatible lockfile and dev commands
 
 **Plans**: 4 plans
+**Wave 1**
+
 - [ ] 04-01-PLAN.md — Config floor (name→pydart-io, py>=3.11, numpy/pandas floors) + benchmark tracer slice (one scenario end-to-end: throughput + RSS + Rust criterion)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 04-02-PLAN.md — Benchmark matrix expansion + BENCHMARKS.md finalize (zero-copy/copy labels, falsifiable pass bar, D-40 caveat)
 - [ ] 04-03-PLAN.md — Packaging pipeline: wheel build (D-34 matrix) + CI + numpy/pandas compat matrix (PKG-01/02/03)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 04-04-PLAN.md — Release: OIDC trusted-publishing workflow + real PyPI publish of pydart-io (D-32)
 
 ## Progress
