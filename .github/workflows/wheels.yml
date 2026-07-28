@@ -1,0 +1,72 @@
+name: Wheels
+
+# PKG-01: build installable wheels for every D-34 (OS, arch) cell via maturin-action.
+# Triggers: manual dispatch (for ad-hoc verification) and tag pushes (Plan 04's release
+# workflow consumes these artifacts for the actual PyPI publish step).
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - "v*"
+
+# T-04-02 (mitigate): default to read-only repo access workflow-wide. This workflow only
+# builds and uploads artifacts -- it never needs write access to repo contents, and
+# `id-token: write` (OIDC publish) is scoped to Plan 04's dedicated publish job only, never
+# granted here or repo/workflow-wide.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build wheel (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # D-34 cells -- all five must be present, none silently omitted.
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            manylinux: "2014"
+          # Native arm64 hosted runner (GA Aug 2025 for public repos) -- avoids QEMU
+          # cross-compilation entirely (Pitfall 5). Requires this repo to be public; if it
+          # must stay private, switch this cell to `ubuntu-latest` + `docker/setup-qemu-action`
+          # cross-compilation instead (see 04-03-PLAN.md Task 3 how-to-verify).
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            manylinux: "2014"
+          - runner: macos-13
+            target: x86_64-apple-darwin
+          - runner: macos-14
+            target: aarch64-apple-darwin
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pitfall 3 backstop finding (flagged prohibition, verification: backstop):
+      # crates/pydart-python depends on the `numpy` (rust-numpy) crate 0.29.0, which does NOT
+      # read an installed numpy Python package at build time (confirmed by reading
+      # numpy-0.29.0's build.rs -- it only calls `pyo3_build_config::use_pyo3_cfgs()`) and does
+      # NOT compile against numpy's C headers at all. Its required ABI feature version
+      # (`NPY_FEATURE_VERSION` / "1.15") is a fixed constant hand-rolled into the crate's own
+      # `npyffi` module (src/npyffi/numpyconfig.rs), independent of whatever numpy happens to be
+      # installed in the build environment. The classic "wheel built against latest numpy breaks
+      # on older numpy" C-extension failure mode therefore does not apply to this binding layer
+      # the way it would to a raw C extension compiled against numpy/arrayobject.h -- there is no
+      # numpy package to install or pin for this build step, and no explicit floor-pin action is
+      # needed here. (This differs from the crate's *Python-side* dev-dependency floor, which is
+      # governed separately by pyproject.toml's `numpy>=2.3,<2.6` and exercised by
+      # compat-matrix.yml, not by this build step.)
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux || 'auto' }}
+          args: --release --out dist
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.target }}
+          path: dist/*.whl
