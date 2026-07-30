@@ -5,10 +5,10 @@ milestone_name: milestone
 current_phase: 04
 current_phase_name: benchmark-release-readiness
 status: executing
-stopped_at: 04-04-PLAN.md Task 2 checkpoint (blocking-human, PyPI trusted publisher)
-last_updated: "2026-07-28T12:10:00.000Z"
-last_activity: 2026-07-28
-last_activity_desc: 04-04 Task 1 (release.yml OIDC workflow) authored and committed; paused at Task 2 human-only PyPI trusted-publisher checkpoint
+stopped_at: 04-04-PLAN.md Task 3 checkpoint (blocking, real PyPI publish gated on unresolved pre-release perf blocker)
+last_updated: "2026-07-30T00:00:00.000Z"
+last_activity: 2026-07-30
+last_activity_desc: 04-04 Task 2 (PyPI trusted publisher) signed off by human (screenshot-verified: pending publisher pydart-io / gablalou/pydart-io / release.yml / pypi env). Task 3 (trigger real PyPI publish + verify install) NOT executed -- halted because STATE.md's own pre-existing blocker ("User wants the phase paused before Plan 04-04's real PyPI release until the FFI/GIL bottleneck is investigated") has not been cleared, and Task 3 is itself a blocking checkpoint requiring explicit human decision, not auto-executable.
 progress:
   total_phases: 4
   completed_phases: 3
@@ -29,8 +29,8 @@ See: .planning/PROJECT.md (updated 2026-07-24)
 
 Phase: 04 (benchmark-release-readiness) — EXECUTING
 Plan: 4 of 4
-Status: PAUSED — Task 1 of 3 done; Task 2 is a blocking-human checkpoint (PyPI trusted publisher configuration) awaiting a fresh continuation agent
-Last activity: 2026-07-28 — 04-04 Task 1 (release.yml) authored and committed (601b787)
+Status: PAUSED — Tasks 1-2 of 3 done (release.yml authored; PyPI trusted publisher signed off by human); Task 3 (trigger real PyPI publish) is a blocking checkpoint held pending an explicit human decision on the pre-existing FFI/GIL performance blocker (see Blockers/Concerns below)
+Last activity: 2026-07-30 — 04-04 Task 2 signed off (trusted publisher confirmed via screenshot); Task 3 NOT triggered
 
 Progress: [█████████░] 94%
 
@@ -138,7 +138,7 @@ None yet.
 - Phase 4 (research-flagged): benchmarking methodology (criterion/pytest-benchmark/codspeed) and manylinux/glibc floor are MEDIUM-confidence, task-derived recommendations — validate current best practice at plan time.
 - Phase 3 (accepted, documented -- see 03-04-SUMMARY.md Known Gap): arrow-rs's ArrowWriter/DictEncoder reassigns dictionary keys in first-occurrence-during-encoding order and drops unused categories on Parquet write, so a categorical's .cat.categories order and unused categories do NOT survive a Parquet round-trip (values and dict_is_ordered DO survive correctly). Cosmetic for unordered categoricals; a real correctness concern for ordered categoricals since the < relationship between categories can silently change. No WriterProperties fix exists in parquet 59.1.0 (arrow-rs-only constraint); pyarrow does not share this limitation. Surface in Phase 4 release docs if categorical fidelity is a headline interop claim.
 - Phase 4 (from 04-02, human-signed-off finding): pydart's core 'measurably faster than pyarrow' value claim is NOT currently substantiated -- from_pandas/to_parquet/from_parquet are 3-43x slower than pyarrow on every scenario except to_pandas (near-parity/win). Accepted as an honest, non-blocking finding for Plan 04-02 (BENCH-01/BENCH-02 only require an honest suite, not a passing bar). User wants the phase paused before Plan 04-04's real PyPI release until the FFI/GIL bottleneck is investigated.
-- Phase 4 Plan 4 (blocking-human checkpoint, IN PROGRESS): `.github/workflows/release.yml` is authored and committed (`601b787`), but PKG-03's real-PyPI half is NOT satisfied yet -- Task 2 requires a human with PyPI account ownership to configure a Trusted Publisher (GitHub OIDC) for `pydart-io` (repo + `release.yml` + `pypi` environment) and re-verify the name is still free, before Task 3 can trigger the release and verify a real `uv add pydart-io` install. Do not mark PKG-03 complete until both are done.
+- Phase 4 Plan 4 (blocking checkpoint, IN PROGRESS): `.github/workflows/release.yml` is authored and committed (`601b787`); Task 2 (PyPI trusted publisher for `pydart-io`) is signed off by the human (screenshot-verified: repo `gablalou/pydart-io` + `release.yml` + `pypi` environment). Task 3 (trigger the real PyPI publish and verify `uv add pydart-io` / `import pydart`) has been deliberately HELD, not executed -- publishing is irreversible (PyPI permanently consumes the `0.1.0` version number and the `pydart-io` name) and the pre-existing blocker directly below (FFI/GIL bottleneck, 3-43x slower than pyarrow on every axis except `to_pandas`) has explicitly NOT been resolved. The next agent/human must make an explicit go/no-go call on Task 3 before any tag push or `workflow_dispatch` of release.yml; do not treat this pause as equivalent to approval to proceed.
 - ~~Phase 4 Plan 3 Task 3 (blocking-human checkpoint): repo has no git remote -- wheels.yml/ci.yml/compat-matrix.yml are authored and a host wheel was proven locally, but the full D-34 wheel matrix and D-37 compat matrix cannot run until the repo is created on GitHub and pushed.~~ -- **Resolved**: public repo `gablalou/pydart-io` created and pushed; all five D-34 wheel cells, ci.yml, and both compat-matrix.yml endpoints confirmed green on GitHub Actions (run IDs 30349901732/30349901156/30349901256 on commit fdeca01), after fixing a retired `macos-13` runner image (see 04-03-SUMMARY.md and the decision above).
 
 ### Quick Tasks Completed
@@ -158,6 +158,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-28T10:23:31.596Z
-Stopped at: Completed 04-03-PLAN.md
-Resume file: None
+Last session: 2026-07-30T00:00:00.000Z
+Stopped at: 04-04-PLAN.md Task 3 checkpoint (blocking) -- held pending explicit human go/no-go on real PyPI publish given the unresolved pre-release FFI/GIL performance blocker
+Resume file: .planning/phases/04-benchmark-release-readiness/04-04-PLAN.md
